@@ -11,30 +11,31 @@ log_file_path = '/opt/adguardhome/work/data/querylog.json'
 position_file_path = '/opt/adguardhome/work/data/.position'
 
 def get_last_position():
-    try:
-        with open(position_file_path, 'r') as f:
-            pos = int(f.read().strip())
-            inode = os.stat(log_file_path).st_ino
-            print(f"Read last position: {pos}, inode: {inode}")
+    if os.path.exists(position_file_path):
+        try:
+            with open(position_file_path, 'r') as f:
+                pos = int(f.read().strip())
+                inode = os.stat(log_file_path).st_ino
+                print(f"Read last position: {pos}, inode: {inode}")
+                sys.stdout.flush()
+                return pos, inode
+        except (ValueError, OSError) as e:
+            print(f"Error reading last position: {e}")
             sys.stdout.flush()
-            return pos, inode
-    except (FileNotFoundError, ValueError) as e:
-        print(f"Error reading last position: {e}")
+            return 0, None
+    else:
+        print("Position file not found, starting from the beginning.")
         sys.stdout.flush()
         return 0, None
 
 def save_last_position(pos, inode):
     with open(position_file_path, 'w') as f:
         f.write(f"{pos}\n{inode}")
-    print(f"Saved position: {pos}, inode: {inode}")
-    sys.stdout.flush()
 
 def read_new_lines(file, start_pos):
     file.seek(start_pos)
     lines = file.readlines()
     new_pos = file.tell()
-    print(f"Read {len(lines)} new lines, new position: {new_pos}")
-    sys.stdout.flush()
     return lines, new_pos
 
 def reset_metrics():
@@ -57,8 +58,6 @@ def parse_and_export(lines):
                     status='blocked' if data.get('Result', {}).get('IsFiltered', False) else 'success',
                     upstream=data.get('Upstream', 'unknown')
                 ).inc()
-                print(f"Exported metric for query: {data.get('QH', 'unknown')}")
-                sys.stdout.flush()
             except json.JSONDecodeError as e:
                 print(f"Error decoding JSON: {e}, line: {line}")
                 sys.stdout.flush()
