@@ -41,15 +41,22 @@ def parse_and_export(lines):
     for line in lines:
         if line.strip():
             data = json.loads(line)
-            dns_queries.labels(
-                qh=data.get('QH', 'unknown'),
-                ip=data.get('IP', 'unknown'),
-                qt=data.get('QT', 'unknown'),
-                response_size=str(len(data.get('Answer', ''))),
-                result_reason=str(data.get('Result', {}).get('Reason', 'unknown')),
-                status='blocked' if data.get('Result', {}).get('IsFiltered', False) else 'success',
-                upstream=data.get('Upstream', 'unknown')
-            ).inc()
+            if isinstance(data, list):
+                for entry in data:
+                    export_entry(entry)
+            else:
+                export_entry(data)
+
+def export_entry(data):
+    dns_queries.labels(
+        qh=data.get('QH', 'unknown'),
+        ip=data.get('IP', 'unknown'),
+        qt=data.get('QT', 'unknown'),
+        response_size=str(len(data.get('Answer', ''))),
+        result_reason=str(data.get('Result', {}).get('Reason', 'unknown')),
+        status='blocked' if data.get('Result', {}).get('IsFiltered', False) else 'success',
+        upstream=data.get('Upstream', 'unknown')
+    ).inc()
 
 if __name__ == '__main__':
     # Ensure the query log file exists
