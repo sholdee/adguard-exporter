@@ -9,6 +9,11 @@ dns_queries = Counter('dns_queries', 'Details of DNS queries', ['qh', 'ip', 'qt'
 log_file_path = '/opt/adguardhome/work/data/querylog.json'
 position_file_path = '/opt/adguardhome/work/data/.position'
 
+def ensure_query_log_exists():
+    if not os.path.exists(log_file_path):
+        with open(log_file_path, 'w') as f:
+            json.dump([], f)
+
 def get_last_position():
     try:
         with open(position_file_path, 'r') as f:
@@ -47,6 +52,9 @@ def parse_and_export(lines):
             ).inc()
 
 if __name__ == '__main__':
+    # Ensure the query log file exists
+    ensure_query_log_exists()
+
     # Start the Prometheus metrics server
     start_http_server(8000)
 
