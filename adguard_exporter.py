@@ -2,10 +2,10 @@ import time
 import json
 import os
 import sys
-from prometheus_client import start_http_server, Counter
+from prometheus_client import start_http_server, Gauge
 
 # Define a single Prometheus metric
-dns_queries = Counter('dns_queries', 'Details of DNS queries', ['qh', 'ip', 'qt', 'response_size', 'result_reason', 'status', 'upstream'])
+dns_queries = Gauge('dns_queries', 'Details of DNS queries', ['qh', 'ip', 'qt', 'response_size', 'result_reason', 'status', 'upstream'])
 
 log_file_path = '/opt/adguardhome/work/data/querylog.json'
 position_file_path = '/opt/adguardhome/work/data/.position'
@@ -14,8 +14,9 @@ def get_last_position():
     if os.path.exists(position_file_path):
         try:
             with open(position_file_path, 'r') as f:
-                pos = int(f.read().strip())
-                inode = os.stat(log_file_path).st_ino
+                pos, inode = f.read().strip().split('\n')
+                pos = int(pos)
+                inode = int(inode)
                 print(f"Read last position: {pos}, inode: {inode}")
                 sys.stdout.flush()
                 return pos, inode
