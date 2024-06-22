@@ -1,11 +1,10 @@
 import time
 import json
 import os
-from prometheus_client import start_http_server, Gauge, Counter
+from prometheus_client import start_http_server, Counter
 
-# Define Prometheus metrics
-dns_queries_total = Counter('dns_queries_total', 'Total number of DNS queries')
-dns_query_duration_seconds = Gauge('dns_query_duration_seconds', 'Duration of DNS queries', ['qh', 'ip', 'qt', 'response_size', 'result_reason', 'status', 'upstream'])
+# Define a single Prometheus metric
+dns_queries = Counter('dns_queries', 'Details of DNS queries', ['qh', 'ip', 'qt', 'response_size', 'result_reason', 'status', 'upstream'])
 
 log_file_path = '/opt/adguardhome/work/data/querylog.json'
 position_file_path = '/opt/adguardhome/work/data/.position'
@@ -30,16 +29,14 @@ def read_new_lines(file, start_pos):
     return lines, new_pos
 
 def reset_metrics():
-    # Reset the Counter and Gauge metrics
-    dns_queries_total._value.set(0)
-    dns_query_duration_seconds.clear()
+    # Reset the Counter metrics
+    dns_queries._metrics.clear()
 
 def parse_and_export(lines):
     for line in lines:
         if line.strip():
             data = json.loads(line)
-            dns_queries_total.inc()
-            dns_query_duration_seconds.labels(
+            dns_queries.labels(
                 qh=data.get('QH', 'unknown'),
                 ip=data.get('IP', 'unknown'),
                 qt=data.get('QT', 'unknown'),
@@ -47,7 +44,7 @@ def parse_and_export(lines):
                 result_reason=str(data.get('Result', {}).get('Reason', 'unknown')),
                 status='blocked' if data.get('Result', {}).get('IsFiltered', False) else 'success',
                 upstream=data.get('Upstream', 'unknown')
-            ).set(data.get('Elapsed', 0))
+            ).inc()
 
 if __name__ == '__main__':
     # Start the Prometheus metrics server
