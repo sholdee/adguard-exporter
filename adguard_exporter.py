@@ -7,8 +7,8 @@ from prometheus_client import start_http_server, Gauge, Counter
 dns_queries_total = Counter('dns_queries_total', 'Total number of DNS queries')
 dns_query_duration_seconds = Gauge('dns_query_duration_seconds', 'Duration of DNS queries', ['qh', 'ip', 'qt', 'response_size', 'result_reason', 'status', 'upstream'])
 
-log_file_path = 'querylog.json'
-position_file_path = '.position'
+log_file_path = '/opt/adguardhome/work/data/querylog.json'
+position_file_path = '/opt/adguardhome/work/data/.position'
 
 def get_last_position():
     try:
