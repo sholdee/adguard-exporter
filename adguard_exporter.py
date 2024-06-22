@@ -1,43 +1,78 @@
-from prometheus_client import start_http_server, Gauge
-import json
 import time
+import json
 import os
+from prometheus_client import start_http_server, Gauge, Counter
 
-# Define Prometheus metric
-dns_queries = Gauge('dns_queries', 'DNS query metrics', ['qh', 'qt', 'upstream', 'result_reason', 'ip', 'status', 'response_size'])
+# Define Prometheus metrics
+dns_queries_total = Counter('dns_queries_total', 'Total number of DNS queries')
+dns_query_duration_seconds = Gauge('dns_query_duration_seconds', 'Duration of DNS queries', ['qh', 'ip', 'qt', 'response_size', 'result_reason', 'status', 'upstream'])
 
-def process_log_line(line):
-    data = json.loads(line)
-    qh = data.get('QH', 'unknown')
-    qt = data.get('QT', 'unknown')
-    upstream = data.get('Upstream', 'unknown')
-    result = data.get('Result', {})
-    result_reason = result.get('Reason', 'unknown')
-    elapsed = data.get('Elapsed', 0)
-    ip = data.get('IP', 'unknown')
-    answer = data.get('Answer', '')
-    response_size = len(answer)
-    status = 'success' if not result else 'failure'
+log_file_path = 'querylog.json'
+position_file_path = '.position'
 
-    # Check if the query was blocked
-    if result.get('IsFiltered', False):
-        status = 'blocked'
+def get_last_position():
+    try:
+        with open(position_file_path, 'r') as f:
+            pos = int(f.read().strip())
+            inode = os.stat(log_file_path).st_ino
+            return pos, inode
+    except (FileNotFoundError, ValueError):
+        return 0, None
 
-    # Update Prometheus metric
-    dns_queries.labels(qh, qt, upstream, result_reason, ip, status, response_size).set(elapsed)
+def save_last_position(pos, inode):
+    with open(position_file_path, 'w') as f:
+        f.write(f"{pos}\n{inode}")
 
-def read_querylog():
-    file_path = '/opt/adguardhome/work/data/querylog.json'
-    with open(file_path, 'r') as file:
-        for line in file:
-            process_log_line(line)
+def read_new_lines(file, start_pos):
+    file.seek(start_pos)
+    lines = file.readlines()
+    new_pos = file.tell()
+    return lines, new_pos
 
-def main():
-    # Start up the server to expose the metrics.
-    start_http_server(8000)
-    while True:
-        read_querylog()
-        time.sleep(60)
+def reset_metrics():
+    # Reset the Counter and Gauge metrics
+    dns_queries_total._value.set(0)
+    dns_query_duration_seconds.clear()
+
+def parse_and_export(lines):
+    for line in lines:
+        if line.strip():
+            data = json.loads(line)
+            dns_queries_total.inc()
+            dns_query_duration_seconds.labels(
+                qh=data.get('QH', 'unknown'),
+                ip=data.get('IP', 'unknown'),
+                qt=data.get('QT', 'unknown'),
+                response_size=str(len(data.get('Answer', ''))),
+                result_reason=str(data.get('Result', {}).get('Reason', 'unknown')),
+                status='blocked' if data.get('Result', {}).get('IsFiltered', False) else 'success',
+                upstream=data.get('Upstream', 'unknown')
+            ).set(data.get('Elapsed', 0))
 
 if __name__ == '__main__':
-    main()
+    # Start the Prometheus metrics server
+    start_http_server(8000)
+
+    # Get the last read position and inode
+    last_position, last_inode = get_last_position()
+
+    while True:
+        current_inode = os.stat(log_file_path).st_ino
+
+        # Check for log rotation
+        if last_inode and last_inode != current_inode:
+            last_position = 0
+            reset_metrics()
+
+        with open(log_file_path, 'r') as log_file:
+            new_lines, new_position = read_new_lines(log_file, last_position)
+            if new_lines:
+                parse_and_export(new_lines)
+                save_last_position(new_position, current_inode)
+
+        # Update last position and inode
+        last_position = new_position
+        last_inode = current_inode
+
+        # Sleep for a while before reading the log again
+        time.sleep(10)
