@@ -2,10 +2,20 @@ import time
 import json
 import os
 import sys
-from prometheus_client import start_http_server, Gauge
+from prometheus_client import start_http_server, Counter
+from collections import Counter as CollectionsCounter
 
-# Define a single Prometheus metric
-dns_queries = Gauge('dns_queries', 'Details of DNS queries', ['qh', 'ip', 'qt', 'response_size', 'result_reason', 'status', 'upstream'])
+# Define separate Prometheus metrics
+dns_queries = Counter('dns_queries', 'Total number of DNS queries')
+blocked_queries = Counter('blocked_dns_queries', 'Total number of blocked DNS queries')
+query_types = Counter('dns_query_types', 'Types of DNS queries', ['query_type'])
+top_hosts = Counter('dns_query_hosts', 'Top DNS query hosts', ['host'])
+top_blocked_hosts = Counter('blocked_dns_query_hosts', 'Top blocked DNS query hosts', ['host'])
+safe_search_enforced_hosts = Counter('safe_search_enforced_hosts', 'Safe search enforced hosts', ['host'])
+
+# Define counters to track hosts
+host_counter = CollectionsCounter()
+blocked_host_counter = CollectionsCounter()
 
 log_file_path = '/opt/adguardhome/work/data/querylog.json'
 position_file_path = '/opt/adguardhome/work/data/.position'
@@ -39,37 +49,46 @@ def read_new_lines(file, start_pos):
     new_pos = file.tell()
     return lines, new_pos
 
-def reset_metrics():
-    # Reset the Counter metrics
-    dns_queries._metrics.clear()
-    print("Metrics reset")
-    sys.stdout.flush()
+def update_top_hosts(counter, metric, top_n):
+    top_items = counter.most_common(top_n)
+    metric._metrics.clear()
+    for item in top_items:
+        metric.labels(item[0]).inc(item[1])
 
 def parse_and_export(lines):
+    global host_counter, blocked_host_counter
+
     for line in lines:
         if line.strip():
             try:
                 data = json.loads(line)
-                dns_queries.labels(
-                    qh=data.get('QH', 'unknown'),
-                    ip=data.get('IP', 'unknown'),
-                    qt=data.get('QT', 'unknown'),
-                    response_size=str(len(data.get('Answer', ''))),
-                    result_reason=str(data.get('Result', {}).get('Reason', 'unknown')),
-                    status='blocked' if data.get('Result', {}).get('IsFiltered', False) else 'success',
-                    upstream=data.get('Upstream', 'unknown')
-                ).inc()
+                host = data.get('QH', 'unknown')
+                query_type = data.get('QT', 'unknown')
+                is_blocked = data.get('Result', {}).get('IsFiltered', False)
+                result_reason = str(data.get('Result', {}).get('Reason', 'unknown'))
+                status = 'blocked' if is_blocked else 'success'
+
+                dns_queries.inc()
+                query_types.labels(query_type).inc()
+                host_counter[host] += 1
+                if is_blocked and result_reason == '3':
+                    blocked_queries.inc()
+                    blocked_host_counter[host] += 1
+                if is_blocked and result_reason == '7':
+                    safe_search_enforced_hosts.labels(host).inc()
+
+                # Update Prometheus metrics with top 100 hosts
+                update_top_hosts(host_counter, top_hosts, 100)
+                update_top_hosts(blocked_host_counter, top_blocked_hosts, 100)
             except json.JSONDecodeError as e:
                 print(f"Error decoding JSON: {e}, line: {line}")
                 sys.stdout.flush()
+                pass
 
 if __name__ == '__main__':
-    # Start the Prometheus metrics server
     start_http_server(8000)
     print("Prometheus metrics server started on port 8000")
     sys.stdout.flush()
-
-    # Wait for the log file to exist
     while not os.path.exists(log_file_path):
         print(f"Waiting for {log_file_path} to be created...")
         sys.stdout.flush()
@@ -77,18 +96,14 @@ if __name__ == '__main__':
 
     print(f"Log file {log_file_path} found")
     sys.stdout.flush()
-
-    # Get the last read position and inode
     last_position, last_inode = get_last_position()
 
     while True:
         try:
             current_inode = os.stat(log_file_path).st_ino
 
-            # Check for log rotation
             if last_inode and last_inode != current_inode:
                 last_position = 0
-                reset_metrics()
                 print(f"Log file rotated, resetting position to {last_position}")
                 sys.stdout.flush()
 
@@ -98,7 +113,6 @@ if __name__ == '__main__':
                     parse_and_export(new_lines)
                     save_last_position(new_position, current_inode)
 
-            # Update last position and inode
             last_position = new_position
             last_inode = current_inode
 
@@ -106,5 +120,4 @@ if __name__ == '__main__':
             print(f"Error during processing: {e}")
             sys.stdout.flush()
 
-        # Sleep for a while before reading the log again
         time.sleep(10)
