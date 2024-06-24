@@ -43,7 +43,6 @@ jobs:
           tags: |
             sholdee/adguardexporter:latest
             sholdee/adguardexporter:${{ github.sha }}
-            sholdee/adguardexporter:${{ github.ref_name }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
