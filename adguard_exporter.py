@@ -2,8 +2,9 @@ import time
 import json
 import os
 import sys
-from prometheus_client import start_http_server, Counter, Gauge
+from prometheus_client import start_http_server, Counter, Gauge, make_wsgi_app
 from collections import Counter as CollectionsCounter, defaultdict
+from wsgiref.simple_server import make_server
 
 # Define separate Prometheus metrics
 dns_queries = Counter('dns_queries', 'Total number of DNS queries')
@@ -117,8 +118,11 @@ def parse_and_export(lines):
 
 if __name__ == '__main__':
     start_http_server(8000)
-    print("Prometheus metrics server started on port 8000")
+    app = make_wsgi_app()
+    httpd = make_server('', 8000, app)
+    print("Prometheus metrics server started on port 8000, /metrics endpoint")
     sys.stdout.flush()
+    
     while not os.path.exists(log_file_path):
         print(f"Waiting for {log_file_path} to be created...")
         sys.stdout.flush()
