@@ -87,7 +87,9 @@ def parse_and_export(lines):
 
                 dns_queries.inc()
                 query_types.labels(query_type).inc()
-                host_counter[host] += 1
+
+                if not is_blocked:
+                    host_counter[host] += 1
 
                 # Convert nanoseconds to milliseconds
                 elapsed_ms = elapsed_ns / 1_000_000
