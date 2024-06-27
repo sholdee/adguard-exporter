@@ -150,7 +150,21 @@ class LogHandler(FileSystemEventHandler):
         self.is_initialized = False
         self.start_time = time.time()
         self.last_inode = None
+        self.wait_for_log_file()
         self.initial_load()
+
+    def wait_for_log_file(self):
+        max_wait_time = 120  # Maximum wait time in seconds
+        wait_interval = 5    # Interval between checks in seconds
+        start_time = time.time()
+        while not os.path.exists(self.log_file_path):
+            elapsed_time = time.time() - start_time
+            if elapsed_time >= max_wait_time:
+                logger.error(f"Log file did not appear within {max_wait_time} seconds.")
+                return
+            logger.info(f"Waiting for log file to appear... ({int(elapsed_time)} seconds elapsed)")
+            time.sleep(wait_interval)
+        logger.info(f"Log file found: {self.log_file_path}")
 
     def get_inode(self):
         return os.stat(self.log_file_path).st_ino if os.path.exists(self.log_file_path) else None
