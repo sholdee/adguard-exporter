@@ -2,7 +2,7 @@
 
 <p>This exporter is primarily intended to run as a sidecar container for AdGuard Home running in Kubernetes, enabling metrics visibility across multiple replica instances.</p>
 
-<img src="assets/img/agh-grafana-dash.png" width="700">
+[<img src="assets/img/agh-grafana-dash.png" width="700">](https://grafana.com/grafana/dashboards/21403)
 
 # Available metrics:
 ```
