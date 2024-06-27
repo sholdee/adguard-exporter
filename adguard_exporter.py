@@ -256,7 +256,12 @@ def start_metrics_server(port, health_server):
             return health_server.livez(environ, start_response)
         elif environ['PATH_INFO'] == '/readyz':
             return health_server.readyz(environ, start_response)
-        return make_wsgi_app()(environ, start_response)
+        elif environ['PATH_INFO'] == '/metrics':
+            return make_wsgi_app()(environ, start_response)
+        status = '403 Forbidden'
+        headers = [('Content-type', 'text/plain; charset=utf-8')]
+        start_response(status, headers)
+        return [b"Forbidden"]
 
     httpd = make_server('', port, combined_app)
     logger.info(f"Prometheus metrics server started on port {port}, /metrics, /livez, and /readyz endpoints")
