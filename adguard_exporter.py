@@ -1,9 +1,10 @@
 import time
-import json
 import os
 import sys
 import threading
 import logging
+import signal
+import configparser
 from prometheus_client import make_wsgi_app, Counter, Gauge
 from collections import Counter as CollectionsCounter, defaultdict
 from wsgiref.simple_server import make_server
@@ -11,16 +12,25 @@ import heapq
 import orjson
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-import signal
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+log_format = '%(asctime)s - %(levelname)s - %(message)s'
+logging.basicConfig(level=logging.INFO, format=log_format)
 logger = logging.getLogger(__name__)
 
-# Configuration (can be overridden by environment variables)
-LOG_FILE_PATH = os.environ.get('LOG_FILE_PATH', '/adguard/work/data/querylog.json')
-METRICS_PORT = int(os.environ.get('METRICS_PORT', 8000))
-UPDATE_INTERVAL = int(os.environ.get('UPDATE_INTERVAL', 10))
+# Configuration
+config = configparser.ConfigParser()
+config.read_dict({
+    'DEFAULT': {
+        'LOG_FILE_PATH': '/adguard/work/data/querylog.json',
+        'METRICS_PORT': '8000',
+        'UPDATE_INTERVAL': '10'
+    }
+})
+
+log_file_path = os.environ.get('LOG_FILE_PATH', config['DEFAULT']['LOG_FILE_PATH'])
+metrics_port = int(os.environ.get('METRICS_PORT', config['DEFAULT']['METRICS_PORT']))
+update_interval = int(os.environ.get('UPDATE_INTERVAL', config['DEFAULT']['UPDATE_INTERVAL']))
 
 # Define Prometheus metrics
 dns_queries = Counter('agh_dns_queries', 'Total number of DNS queries')
@@ -200,7 +210,7 @@ class LogHandler(FileSystemEventHandler):
 
     def is_healthy(self):
         return (self.is_initialized or time.time() - self.start_time < 120) and \
-               (not os.path.exists(self.log_file_path) or time.time() - self.last_update_time < UPDATE_INTERVAL * 2)
+               (not os.path.exists(self.log_file_path) or time.time() - self.last_update_time < update_interval * 2)
 
 class HealthServer:
     def __init__(self, log_handler):
@@ -228,38 +238,34 @@ def start_metrics_server(port, health_server):
 
     httpd = make_server('', port, combined_app)
     logger.info(f"Prometheus metrics server started on port {port}, /metrics, /livez, and /readyz endpoints")
-    httpd.serve_forever()
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd
 
 def graceful_shutdown(signum, frame):
     logger.info("Received shutdown signal. Exiting...")
     observer.stop()
     observer.join()
+    metrics_server.shutdown()
     sys.exit(0)
 
 if __name__ == '__main__':
     metrics_collector = MetricsCollector()
-    log_handler = LogHandler(LOG_FILE_PATH, metrics_collector)
+    log_handler = LogHandler(log_file_path, metrics_collector)
     health_server = HealthServer(log_handler)
 
     observer = Observer()
-    observer.schedule(log_handler, path=os.path.dirname(LOG_FILE_PATH), recursive=False)
+    observer.schedule(log_handler, path=os.path.dirname(log_file_path), recursive=False)
     observer.start()
 
-    metrics_thread = threading.Thread(target=start_metrics_server, args=(METRICS_PORT, health_server))
-    metrics_thread.daemon = True
-    metrics_thread.start()
+    metrics_server = start_metrics_server(metrics_port, health_server)
 
     signal.signal(signal.SIGTERM, graceful_shutdown)
     signal.signal(signal.SIGINT, graceful_shutdown)
 
     try:
         while True:
-            time.sleep(UPDATE_INTERVAL)
+            time.sleep(update_interval)
     except KeyboardInterrupt:
         pass
     finally:
-        observer.stop()
-        observer.join()
-        # Make sure the metrics server is properly stopped
-        logger.info("Shutting down the metrics server.")
-        sys.exit(0)
+        graceful_shutdown(None, None)
