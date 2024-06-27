@@ -18,6 +18,14 @@ log_format = '%(asctime)s - %(levelname)s - %(message)s'
 logging.basicConfig(level=logging.INFO, format=log_format)
 logger = logging.getLogger(__name__)
 
+# Explicitly add a stream handler for stdout
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter(log_format)
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.propagate = False
+
 # Configuration
 config = configparser.ConfigParser()
 config.read_dict({
