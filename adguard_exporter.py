@@ -40,6 +40,10 @@ log_file_path = os.environ.get('LOG_FILE_PATH', config['DEFAULT']['LOG_FILE_PATH
 metrics_port = int(os.environ.get('METRICS_PORT', config['DEFAULT']['METRICS_PORT']))
 update_interval = int(os.environ.get('UPDATE_INTERVAL', config['DEFAULT']['UPDATE_INTERVAL']))
 
+logger.info(f"Using log file path: {log_file_path}")
+logger.info(f"Using metrics port: {metrics_port}")
+logger.info(f"Using update interval: {update_interval}")
+
 # Define Prometheus metrics
 dns_queries = Counter('agh_dns_queries', 'Total number of DNS queries')
 blocked_queries = Counter('agh_blocked_dns_queries', 'Total number of blocked DNS queries')
