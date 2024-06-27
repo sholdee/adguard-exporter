@@ -2,7 +2,8 @@ import time
 import json
 import os
 import sys
-from prometheus_client import start_http_server, Counter, Gauge, make_wsgi_app
+import threading
+from prometheus_client import make_wsgi_app, Counter, Gauge
 from collections import Counter as CollectionsCounter, defaultdict
 from wsgiref.simple_server import make_server
 
@@ -116,13 +117,18 @@ def parse_and_export(lines):
 
     calculate_averages()
 
-if __name__ == '__main__':
-    start_http_server(8000)
+def start_metrics_server():
     app = make_wsgi_app()
     httpd = make_server('', 8000, app)
     print("Prometheus metrics server started on port 8000, /metrics endpoint")
     sys.stdout.flush()
-    
+    httpd.serve_forever()
+
+if __name__ == '__main__':
+    metrics_thread = threading.Thread(target=start_metrics_server)
+    metrics_thread.daemon = True
+    metrics_thread.start()
+
     while not os.path.exists(log_file_path):
         print(f"Waiting for {log_file_path} to be created...")
         sys.stdout.flush()
