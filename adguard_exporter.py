@@ -156,7 +156,7 @@ class LogHandler(FileSystemEventHandler):
         self.last_inode = None
 
     def wait_for_log_file(self):
-        max_wait_time = 120  # Maximum wait time in seconds
+        max_wait_time = 300  # Maximum wait time in seconds
         wait_interval = 5    # Interval between checks in seconds
         start_time = time.time()
         while not os.path.exists(self.log_file_path):
@@ -231,10 +231,10 @@ class LogHandler(FileSystemEventHandler):
             logger.error(f"Error processing log file: {e}")
 
     def is_ready(self):
-        return self.is_initialized or time.time() - self.start_time < 120
+        return self.is_initialized or time.time() - self.start_time < 300
 
     def is_healthy(self):
-        return (self.is_initialized or time.time() - self.start_time < 120) and \
+        return (self.is_initialized or time.time() - self.start_time < 300) and \
                (not os.path.exists(self.log_file_path) or time.time() - self.last_update_time < update_interval * 30)
 
 class HealthServer:
