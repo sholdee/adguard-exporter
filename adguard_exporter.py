@@ -198,7 +198,7 @@ class LogHandler(FileSystemEventHandler):
 
     def on_modified(self, event):
         if event.src_path == self.log_file_path:
-            logger.info(f"Log file modified: {self.log_file_path}")
+            logger.debug(f"Log file modified: {self.log_file_path}")
             self.process_new_lines()
 
     def process_new_lines(self):
@@ -216,7 +216,7 @@ class LogHandler(FileSystemEventHandler):
             with open(self.log_file_path, 'r') as log_file:
                 log_file.seek(self.last_position)
                 lines = log_file.readlines()
-                logger.info(f"Processing {len(lines)} new lines")
+                logger.debug(f"Processing {len(lines)} new lines")
                 for line in lines:
                     if line.strip():
                         try:
