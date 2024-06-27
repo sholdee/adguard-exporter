@@ -150,8 +150,6 @@ class LogHandler(FileSystemEventHandler):
         self.is_initialized = False
         self.start_time = time.time()
         self.last_inode = None
-        self.wait_for_log_file()
-        self.initial_load()
 
     def wait_for_log_file(self):
         max_wait_time = 120  # Maximum wait time in seconds
@@ -161,10 +159,11 @@ class LogHandler(FileSystemEventHandler):
             elapsed_time = time.time() - start_time
             if elapsed_time >= max_wait_time:
                 logger.error(f"Log file did not appear within {max_wait_time} seconds.")
-                return
+                return False
             logger.info(f"Waiting for log file to appear... ({int(elapsed_time)} seconds elapsed)")
             time.sleep(wait_interval)
         logger.info(f"Log file found: {self.log_file_path}")
+        return True
 
     def get_inode(self):
         return os.stat(self.log_file_path).st_ino if os.path.exists(self.log_file_path) else None
@@ -275,11 +274,13 @@ if __name__ == '__main__':
     log_handler = LogHandler(log_file_path, metrics_collector)
     health_server = HealthServer(log_handler)
 
-    observer = Observer()
-    observer.schedule(log_handler, path=os.path.dirname(log_file_path), recursive=False)
-    observer.start()
-
     combined_server = start_combined_server(metrics_port, health_server)
+
+    if log_handler.wait_for_log_file():
+        log_handler.initial_load()
+        observer = Observer()
+        observer.schedule(log_handler, path=log_file_path, recursive=False)
+        observer.start()
 
     signal.signal(signal.SIGTERM, graceful_shutdown)
     signal.signal(signal.SIGINT, graceful_shutdown)
