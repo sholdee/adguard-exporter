@@ -30,7 +30,7 @@ logger.propagate = False
 config = configparser.ConfigParser()
 config.read_dict({
     'DEFAULT': {
-        'LOG_FILE_PATH': '/adguard/work/data/querylog.json',
+        'LOG_FILE_PATH': '/opt/adguardhome/work/data/querylog.json',
         'METRICS_PORT': '8000',
         'UPDATE_INTERVAL': '10'
     }
