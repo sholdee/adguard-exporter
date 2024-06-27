@@ -235,7 +235,7 @@ class LogHandler(FileSystemEventHandler):
 
     def is_healthy(self):
         return (self.is_initialized or time.time() - self.start_time < 120) and \
-               (not os.path.exists(self.log_file_path) or time.time() - self.last_update_time < update_interval * 2)
+               (not os.path.exists(self.log_file_path) or time.time() - self.last_update_time < update_interval * 30)
 
 class HealthServer:
     def __init__(self, log_handler):
