@@ -150,24 +150,10 @@ class LogHandler(FileSystemEventHandler):
         self.is_initialized = False
         self.start_time = time.time()
         self.last_inode = None
-        self.wait_for_log_file()
         self.initial_load()
 
     def get_inode(self):
         return os.stat(self.log_file_path).st_ino if os.path.exists(self.log_file_path) else None
-
-    def wait_for_log_file(self):
-        max_wait_time = 120  # Maximum wait time in seconds
-        wait_interval = 5    # Interval between checks in seconds
-        start_time = time.time()
-        while not os.path.exists(self.log_file_path):
-            elapsed_time = time.time() - start_time
-            if elapsed_time >= max_wait_time:
-                logger.error(f"Log file did not appear within {max_wait_time} seconds.")
-                sys.exit(1)
-            logger.info(f"Waiting for log file to appear... ({int(elapsed_time)} seconds elapsed)")
-            time.sleep(wait_interval)
-        logger.info(f"Log file found: {self.log_file_path}")
 
     def initial_load(self):
         logger.info(f"Performing initial load of log file: {self.log_file_path}")
@@ -250,21 +236,16 @@ class HealthServer:
         start_response(status, headers)
         return [b"Ready" if status == '200 OK' else b"Not Ready"]
 
-def start_metrics_server(port, health_server):
+def start_combined_server(port, health_server):
     def combined_app(environ, start_response):
         if environ['PATH_INFO'] == '/livez':
             return health_server.livez(environ, start_response)
         elif environ['PATH_INFO'] == '/readyz':
             return health_server.readyz(environ, start_response)
-        elif environ['PATH_INFO'] == '/metrics':
-            return make_wsgi_app()(environ, start_response)
-        status = '403 Forbidden'
-        headers = [('Content-type', 'text/plain; charset=utf-8')]
-        start_response(status, headers)
-        return [b"Forbidden"]
+        return make_wsgi_app()(environ, start_response)
 
     httpd = make_server('', port, combined_app)
-    logger.info(f"Prometheus metrics server started on port {port}, /metrics, /livez, and /readyz endpoints")
+    logger.info(f"Combined server started on port {port}, /metrics, /livez, and /readyz endpoints")
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd
 
@@ -272,7 +253,7 @@ def graceful_shutdown(signum, frame):
     logger.info("Received shutdown signal. Exiting...")
     observer.stop()
     observer.join()
-    metrics_server.shutdown()
+    combined_server.shutdown()
     sys.exit(0)
 
 if __name__ == '__main__':
@@ -284,7 +265,7 @@ if __name__ == '__main__':
     observer.schedule(log_handler, path=os.path.dirname(log_file_path), recursive=False)
     observer.start()
 
-    metrics_server = start_metrics_server(metrics_port, health_server)
+    combined_server = start_combined_server(metrics_port, health_server)
 
     signal.signal(signal.SIGTERM, graceful_shutdown)
     signal.signal(signal.SIGINT, graceful_shutdown)
