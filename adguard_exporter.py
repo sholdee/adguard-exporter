@@ -8,14 +8,14 @@ from collections import Counter as CollectionsCounter, defaultdict
 from wsgiref.simple_server import make_server
 
 # Define separate Prometheus metrics
-dns_queries = Counter('dns_queries', 'Total number of DNS queries')
-blocked_queries = Counter('blocked_dns_queries', 'Total number of blocked DNS queries')
-query_types = Counter('dns_query_types', 'Types of DNS queries', ['query_type'])
-top_hosts = Counter('dns_query_hosts', 'Top DNS query hosts', ['host'])
-top_blocked_hosts = Counter('blocked_dns_query_hosts', 'Top blocked DNS query hosts', ['host'])
-safe_search_enforced_hosts = Counter('safe_search_enforced_hosts', 'Safe search enforced hosts', ['host'])
-average_response_time = Gauge('dns_average_response_time', 'Average response time for DNS queries in milliseconds')
-average_upstream_response_time = Gauge('dns_average_upstream_response_time', 'Average response time by upstream server', ['server'])
+dns_queries = Counter('agh_dns_queries', 'Total number of DNS queries')
+blocked_queries = Counter('agh_blocked_dns_queries', 'Total number of blocked DNS queries')
+query_types = Counter('agh_dns_query_types', 'Types of DNS queries', ['query_type'])
+top_hosts = Counter('agh_dns_query_hosts', 'Top DNS query hosts', ['host'])
+top_blocked_hosts = Counter('agh_blocked_dns_query_hosts', 'Top blocked DNS query hosts', ['host'])
+safe_search_enforced_hosts = Counter('agh_safe_search_enforced_hosts', 'Safe search enforced hosts', ['host'])
+average_response_time = Gauge('agh_dns_average_response_time', 'Average response time for DNS queries in milliseconds')
+average_upstream_response_time = Gauge('agh_dns_average_upstream_response_time', 'Average response time by upstream server', ['server'])
 
 # Define counters to track hosts and upstream response times
 host_counter = CollectionsCounter()
