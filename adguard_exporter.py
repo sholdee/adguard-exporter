@@ -150,19 +150,19 @@ class LogHandler(FileSystemEventHandler):
         self.log_file_path = log_file_path
         self.metrics_collector = metrics_collector
         self.last_position = 0
-        self.last_update_time = time.time()
         self.is_initialized = False
         self.start_time = time.time()
         self.last_inode = None
+        self.health_status = True
+        self.max_wait_time = 300  # Maximum wait time in seconds
 
     def wait_for_log_file(self):
-        max_wait_time = 300  # Maximum wait time in seconds
         wait_interval = 5    # Interval between checks in seconds
         start_time = time.time()
         while not os.path.exists(self.log_file_path):
             elapsed_time = time.time() - start_time
-            if elapsed_time >= max_wait_time:
-                logger.error(f"Log file did not appear within {max_wait_time} seconds.")
+            if elapsed_time >= self.max_wait_time:
+                logger.error(f"Log file did not appear within {self.max_wait_time} seconds.")
                 return False
             logger.info(f"Waiting for log file to appear... ({int(elapsed_time)} seconds elapsed)")
             time.sleep(wait_interval)
@@ -185,7 +185,6 @@ class LogHandler(FileSystemEventHandler):
                         except orjson.JSONDecodeError:
                             logger.error(f"Error decoding JSON: {line}")
                 self.last_position = log_file.tell()
-            self.last_update_time = time.time()
             self.is_initialized = True
             logger.info(f"Initial load complete. Processed up to position {self.last_position}")
         else:
@@ -229,8 +228,7 @@ class LogHandler(FileSystemEventHandler):
                             except orjson.JSONDecodeError:
                                 logger.error(f"Error decoding JSON: {line}")
                     self.last_position = log_file.tell()
-                self.last_update_time = time.time()
-                self.is_initialized = True
+                self.health_status = True
                 break  # Successfully processed, exit the retry loop
             except FileNotFoundError:
                 if attempt < max_retries - 1:
@@ -238,16 +236,17 @@ class LogHandler(FileSystemEventHandler):
                     time.sleep(retry_delay)
                 else:
                     logger.error("Max retries reached. Unable to process log file.")
+                    self.health_status = False
             except Exception as e:
                 logger.error(f"Error processing log file: {e}")
+                self.health_status = False
                 break  # Exit the retry loop for other types of exceptions
 
     def is_ready(self):
-        return self.is_initialized or time.time() - self.start_time < 300
+        return self.is_initialized or time.time() - self.start_time < self.max_wait_time
 
     def is_healthy(self):
-        return (self.is_initialized or time.time() - self.start_time < 300) and \
-               (not os.path.exists(self.log_file_path) or time.time() - self.last_update_time < update_interval * 30)
+        return self.health_status
 
 class HealthServer:
     def __init__(self, log_handler):
