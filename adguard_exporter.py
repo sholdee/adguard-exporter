@@ -202,33 +202,45 @@ class LogHandler(FileSystemEventHandler):
             self.process_new_lines()
 
     def process_new_lines(self):
-        try:
-            current_inode = self.get_inode()
-            if current_inode != self.last_inode:
-                logger.info(f"Log file rotated. New inode detected: {current_inode}")
-                self.last_position = 0  # Reset position to start of the new file
-                self.last_inode = current_inode
-
-            if not os.path.exists(self.log_file_path):
-                logger.warning(f"Log file does not exist: {self.log_file_path}")
-                return
-
-            with open(self.log_file_path, 'r') as log_file:
-                log_file.seek(self.last_position)
-                lines = log_file.readlines()
-                logger.debug(f"Processing {len(lines)} new lines")
-                for line in lines:
-                    if line.strip():
-                        try:
-                            data = orjson.loads(line)
-                            self.metrics_collector.update_metrics(data)
-                        except orjson.JSONDecodeError:
-                            logger.error(f"Error decoding JSON: {line}")
-                self.last_position = log_file.tell()
-            self.last_update_time = time.time()
-            self.is_initialized = True
-        except Exception as e:
-            logger.error(f"Error processing log file: {e}")
+        max_retries = 5
+        retry_delay = 1  # second
+    
+        for attempt in range(max_retries):
+            try:
+                current_inode = self.get_inode()
+                if current_inode != self.last_inode:
+                    logger.info(f"Log file rotated. New inode detected: {current_inode}")
+                    self.last_position = 0  # Reset position to start of the new file
+                    self.last_inode = current_inode
+    
+                if not os.path.exists(self.log_file_path):
+                    logger.warning(f"Log file does not exist: {self.log_file_path}")
+                    raise FileNotFoundError(f"Log file not found: {self.log_file_path}")
+    
+                with open(self.log_file_path, 'r') as log_file:
+                    log_file.seek(self.last_position)
+                    lines = log_file.readlines()
+                    logger.debug(f"Processing {len(lines)} new lines")
+                    for line in lines:
+                        if line.strip():
+                            try:
+                                data = orjson.loads(line)
+                                self.metrics_collector.update_metrics(data)
+                            except orjson.JSONDecodeError:
+                                logger.error(f"Error decoding JSON: {line}")
+                    self.last_position = log_file.tell()
+                self.last_update_time = time.time()
+                self.is_initialized = True
+                break  # Successfully processed, exit the retry loop
+            except FileNotFoundError:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Log file not found. Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                else:
+                    logger.error("Max retries reached. Unable to process log file.")
+            except Exception as e:
+                logger.error(f"Error processing log file: {e}")
+                break  # Exit the retry loop for other types of exceptions
 
     def is_ready(self):
         return self.is_initialized or time.time() - self.start_time < 300
