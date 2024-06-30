@@ -26,13 +26,13 @@ querylog:
   dir_path: ""
   ignored:
     - localhost
-  interval: 168h
+  interval: 24h
   size_memory: 5
   enabled: true
   file_enabled: true
 ```
 
-<p>Add the sidecar container to your existing Adguard deployment manifest.</p>
+<p>Add the sholdee/adguardexporter sidecar container to your existing Adguard deployment manifest.</p>
 
 ### deployment.yaml
 ```yaml
@@ -108,7 +108,7 @@ spec:
             - nslookup localhost 127.0.0.1
         readinessProbe: *probe
       - name: adguard-exporter
-        image: sholdee/adguardexporter:v1.2.6
+        image: sholdee/adguardexporter:v1.2.7
         ports:
         - containerPort: 8000
           name: metrics
