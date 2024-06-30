@@ -75,16 +75,27 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-
 
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            sholdee/adguardexporter
+            ghcr.io/${{ github.repository_owner }}/adguard-exporter
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: |
-            sholdee/adguardexporter:latest
-            sholdee/adguardexporter:${{ github.ref_name }}
-            ghcr.io/${{ github.repository_owner }}/adguard-exporter:latest
-            ghcr.io/${{ github.repository_owner }}/adguard-exporter:${{ github.ref_name }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
