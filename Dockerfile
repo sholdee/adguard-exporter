@@ -21,6 +21,7 @@ EXPOSE 8000
 # Set environment variables (can be overridden at runtime)
 ENV LOG_FILE_PATH=/opt/adguardhome/work/data/querylog.json
 ENV METRICS_PORT=8000
+ENV LOG_LEVEL=INFO
 
 # Run the exporter
 CMD ["python", "./adguard_exporter.py"]

@@ -7,32 +7,41 @@ import signal
 import configparser
 from prometheus_client import make_wsgi_app, Counter, Gauge
 from collections import Counter as CollectionsCounter, defaultdict
-from wsgiref.simple_server import make_server
+from wsgiref.simple_server import make_server, WSGIRequestHandler
 import heapq
 import orjson
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-
-# Set up logging
-log_format = '%(asctime)s - %(levelname)s - %(message)s'
-logging.basicConfig(level=logging.INFO, format=log_format, 
-                    handlers=[logging.StreamHandler(sys.stdout)])
-logger = logging.getLogger(__name__)
 
 # Configuration
 config = configparser.ConfigParser()
 config.read_dict({
     'DEFAULT': {
         'LOG_FILE_PATH': '/opt/adguardhome/work/data/querylog.json',
-        'METRICS_PORT': '8000'
+        'METRICS_PORT': '8000',
+        'LOG_LEVEL': 'INFO'
     }
 })
 
 log_file_path = os.environ.get('LOG_FILE_PATH', config['DEFAULT']['LOG_FILE_PATH'])
 metrics_port = int(os.environ.get('METRICS_PORT', config['DEFAULT']['METRICS_PORT']))
+log_level_str = os.environ.get('LOG_LEVEL', config['DEFAULT']['LOG_LEVEL'])
+
+# Convert string log level to logging constant
+log_level = getattr(logging, log_level_str.upper(), logging.INFO)
+
+# Set up logging
+log_format = '%(asctime)s - %(levelname)s - %(message)s'
+logging.basicConfig(level=log_level, format=log_format, 
+                    handlers=[logging.StreamHandler(sys.stdout)])
+logger = logging.getLogger(__name__)
+
+# Set the level for the wsgiref.simple_server logger
+logging.getLogger('wsgiref.simple_server').setLevel(log_level)
 
 logger.info(f"Using log file path: {log_file_path}")
 logger.info(f"Using metrics port: {metrics_port}")
+logger.info(f"Log level set to: {logging.getLevelName(log_level)}")
 
 # Define Prometheus metrics
 dns_queries = Counter('agh_dns_queries', 'Total number of DNS queries')
@@ -43,6 +52,13 @@ top_blocked_hosts = Counter('agh_blocked_dns_query_hosts', 'Top blocked DNS quer
 safe_search_enforced_hosts = Counter('agh_safe_search_enforced_hosts', 'Safe search enforced hosts', ['host'])
 average_response_time = Gauge('agh_dns_average_response_time', 'Average response time for DNS queries in milliseconds')
 average_upstream_response_time = Gauge('agh_dns_average_upstream_response_time', 'Average response time by upstream server', ['server'])
+
+class CustomRequestHandler(WSGIRequestHandler):
+    def log_request(self, code='-', size='-'):
+        if str(code) == '200':
+            logging.debug('"%s" %s %s', self.requestline, str(code), str(size))
+        else:
+            logging.warning('"%s" %s %s', self.requestline, str(code), str(size))
 
 class TopHosts:
     def __init__(self, max_size=100):
@@ -222,7 +238,7 @@ def start_combined_server(port, health_server):
             return health_server.readyz(environ, start_response)
         return make_wsgi_app()(environ, start_response)
 
-    httpd = make_server('', port, combined_app)
+    httpd = make_server('', port, combined_app, handler_class=CustomRequestHandler)
     logger.info(f"Combined server started on port {port}, /metrics, /livez, and /readyz endpoints")
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd
