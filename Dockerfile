@@ -1,19 +1,26 @@
-FROM python:3-alpine
+FROM golang:1.22-alpine3.20 AS builder
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache --virtual .build-deps gcc musl-dev
+# Copy go mod and sum files
+COPY go.mod go.sum ./
 
-# Copy and install requirements
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Download all dependencies
+RUN go mod download
 
-# Remove build dependencies
-RUN apk del .build-deps
+# Copy the source code
+COPY . ./
 
-# Copy the script
-COPY adguard_exporter.py .
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o adguard-exporter .
+
+# Create a minimal Alpine image
+FROM alpine:3.20
+
+WORKDIR /app
+
+# Copy the binary from the builder stage
+COPY --from=builder /app/adguard-exporter .
 
 # Expose the metrics port
 EXPOSE 8000
@@ -24,4 +31,4 @@ ENV METRICS_PORT=8000
 ENV LOG_LEVEL=INFO
 
 # Run the exporter
-CMD ["python", "./adguard_exporter.py"]
+CMD ["./adguard-exporter"]

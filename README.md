@@ -108,7 +108,7 @@ spec:
             - nslookup localhost 127.0.0.1
         readinessProbe: *probe
       - name: adguard-exporter
-        image: sholdee/adguardexporter:v1.2.8
+        image: sholdee/adguardexporter:v2.0.0
         ports:
         - containerPort: 8000
           name: metrics
