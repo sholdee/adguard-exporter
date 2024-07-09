@@ -11,11 +11,11 @@ RUN go mod download
 # Copy the source code
 COPY . ./
 
-# Build the application
+# Build the application with static linking
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o adguard-exporter .
 
-# Create a minimal Alpine image
-FROM alpine:3.20
+# Create a scratch image
+FROM scratch
 
 WORKDIR /app
 
