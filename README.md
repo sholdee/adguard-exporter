@@ -1,6 +1,6 @@
 # Overview
 
-<p>This exporter is primarily intended to run as a sidecar container for AdGuard Home running in Kubernetes, enabling metrics visibility across multiple replica instances.</p>
+<p>This exporter is primarily intended to run as a sidecar container for AdGuard Home running in Kubernetes, enabling metrics visibility across multiple replica instances. It works by mounting to AdGuard's work directory and reading lines from querylog.json, as in the deployment example below.</p>
 
 [<img src="assets/img/agh-grafana-dash.png" width="700">](https://grafana.com/grafana/dashboards/21403)
 
@@ -108,7 +108,7 @@ spec:
             - nslookup localhost 127.0.0.1
         readinessProbe: *probe
       - name: adguard-exporter
-        image: sholdee/adguardexporter:v2.0.0
+        image: sholdee/adguardexporter:v2.0.1
         ports:
         - containerPort: 8000
           name: metrics
