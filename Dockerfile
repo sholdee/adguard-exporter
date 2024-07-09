@@ -14,8 +14,8 @@ COPY . ./
 # Build the application with static linking
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o adguard-exporter .
 
-# Create a scratch image
-FROM scratch
+# Use distroless as the base image
+FROM gcr.io/distroless/static-debian12:nonroot
 
 WORKDIR /app
 
@@ -29,6 +29,9 @@ EXPOSE 8000
 ENV LOG_FILE_PATH=/opt/adguardhome/work/data/querylog.json
 ENV METRICS_PORT=8000
 ENV LOG_LEVEL=INFO
+
+# Use the nonroot user
+USER nonroot:nonroot
 
 # Run the exporter
 CMD ["./adguard-exporter"]
