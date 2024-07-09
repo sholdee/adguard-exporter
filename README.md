@@ -1,6 +1,6 @@
 # Overview
 
-<p>This exporter is primarily intended to run as a sidecar container for AdGuard Home running in Kubernetes, enabling metrics visibility across multiple replica instances. It works by mounting to AdGuard's work directory and reading lines from querylog.json, as in the deployment example below.</p>
+<p>This exporter is primarily intended to run as a sidecar container for AdGuard Home running in Kubernetes, enabling metrics visibility across multiple replica instances. It works by mounting to AdGuard's work directory and reading lines from querylog.json, as demonstrated in the deployment example below. The exporter is written in Go and uses a distroless image running as nonroot to align with container best-practices.</p>
 
 [<img src="assets/img/agh-grafana-dash.png" width="700">](https://grafana.com/grafana/dashboards/21403)
 
@@ -18,18 +18,30 @@ agh_dns_average_upstream_response_time: Average response time of upstream server
 
 # How to use this container.
 
-<p>Ensure that Adguard is configured to dump query log to file at regular interval using low `size_memory` setting.</p>
+<p>Ensure that Adguard is configured to dump query log to file at regular interval using low `size_memory` setting. This example will cause queries to be logged every 5 lines:</p>
 
-### AdGuardHome.yaml
+### secret.yaml
 ```yaml
-querylog:
-  dir_path: ""
-  ignored:
-    - localhost
-  interval: 24h
-  size_memory: 5
-  enabled: true
-  file_enabled: true
+apiVersion: v1
+kind: Secret
+metadata:
+  name: adguard-secret
+  namespace: adguard
+type: Opaque
+stringData:
+  AdGuardHome.yaml: |
+    # ... [earlier configuration omitted]
+
+    querylog:
+      dir_path: ""
+      ignored:
+        - localhost
+      interval: 24h
+      size_memory: 5
+      enabled: true
+      file_enabled: true
+
+    # ... [remaining configuration omitted]
 ```
 
 <p>Add the sholdee/adguardexporter sidecar container to your existing Adguard deployment manifest.</p>
@@ -41,8 +53,6 @@ kind: Deployment
 metadata:
   name: &app adguard
   namespace: *app
-  annotations:
-    reloader.stakater.com/auto: "true"
 spec:
   replicas: 3
   strategy:
@@ -55,6 +65,13 @@ spec:
       labels:
         app: *app
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       topologySpreadConstraints:
       - maxSkew: 1
         topologyKey: kubernetes.io/hostname
@@ -65,8 +82,17 @@ spec:
       initContainers:
       - name: adguard-init
         image: busybox:1.36.1
+        securityContext:
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          allowPrivilegeEscalation: false
         imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "cp /home/AdGuardHome.yaml /config/AdGuardHome.yaml; chmod 755 /config/AdGuardHome.yaml"]
+        command: ["sh", "-c", "cp /home/AdGuardHome.yaml /config/AdGuardHome.yaml; chmod 644 /config/AdGuardHome.yaml"]
         volumeMounts:
           - mountPath: /home
             name: adguard-secret
@@ -74,7 +100,18 @@ spec:
             name: adguard-conf
       containers:
       - name: adguard-home
-        image: adguard/adguardhome:v0.107.51
+        image: adguard/adguardhome:v0.107.52
+        securityContext:
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_BIND_SERVICE
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          allowPrivilegeEscalation: false
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 53
@@ -108,7 +145,17 @@ spec:
             - nslookup localhost 127.0.0.1
         readinessProbe: *probe
       - name: adguard-exporter
-        image: sholdee/adguardexporter:v2.0.1
+        image: ghcr.io/sholdee/adguard-exporter:v2.0.2
+        securityContext:
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          allowPrivilegeEscalation: false
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
           name: metrics
