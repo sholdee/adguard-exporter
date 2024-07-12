@@ -101,10 +101,14 @@ func (lh *LogHandler) WatchLogFile() {
 				if !ok {
 					return
 				}
+                // Check if the event is for our specific file
+                if filepath.Base(event.Name) != filepath.Base(lh.logFilePath) {
+                    continue // Ignore events for other files
+                }
 				if event.Op&fsnotify.Write == fsnotify.Write {
 					lh.processNewLines()
 				} else if event.Op&fsnotify.Create == fsnotify.Create {
-					log.Printf("Log file created: %s", lh.logFilePath)
+					log.Printf("Log file created: %s", event.Name)
 					lh.fileExists = true
 					lh.lastPosition = 0
 					lh.processNewLines()
@@ -113,6 +117,7 @@ func (lh *LogHandler) WatchLogFile() {
 				if !ok {
 					return
 				}
+				lh.healthStatus = false
 				log.Println("error:", err)
 			}
 		}
