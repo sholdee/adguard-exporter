@@ -1,12 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
-  "packageRules": [
-    {
-      "matchManagers": ["gomod"],
-      "matchPackageNames": ["go"],
-      "enabled": true,
-      "updateTypes": ["major", "minor", "patch"]
-    }
+  "extends": [
+    "config:recommended"
   ]
 }
