@@ -3,7 +3,7 @@ module github.com/sholdee/adguard-exporter
 go 1.23.2
 
 require (
-	github.com/fsnotify/fsnotify v1.7.0
+	github.com/fsnotify/fsnotify v1.8.0
 	github.com/prometheus/client_golang v1.20.5
 )
 
