@@ -50,8 +50,8 @@ putting HTTP concerns into `metrics`.
 - AdGuard query log format assumptions:
   - inspect `loghandler/loghandler.go`
   - inspect `metrics/collector.go`
-  - current fields used: `QH`, `QT`, `Result.IsFiltered`, `Result.Reason`,
-    `Elapsed`, `Upstream`
+  - current fields used: `T`/legacy `Time`, `QH`, `QT`, `Result.IsFiltered`,
+    `Result.Reason`, `Elapsed`, `Upstream`, `Cached`
 - Runtime configuration:
   - update `config/config.go`
   - update Dockerfile `ENV` defaults if applicable
@@ -65,8 +65,9 @@ Do not scan `assets/` unless the README image itself is part of the task.
 
 ## High-Risk Areas
 
-- Log parsing is loosely typed. Bad or changed AdGuard fields may silently turn
-  into zero values.
+- Log parsing uses a typed subset of AdGuard's internal querylog schema. The
+  schema is not a versioned public contract, so keep parse/skip behavior
+  explicit when adding fields.
 - Label cardinality can grow quickly for host and upstream labels.
 - Top-host metrics are reset and repopulated from in-memory state; be careful
   with Prometheus counter semantics.
@@ -136,8 +137,9 @@ git config core.hooksPath .githooks
 
 - Unit tests cover `config`, most of `metrics`, and core `loghandler` file
   processing behavior. Add focused tests before behavior changes.
-- `WatchLogFile` and `main` still need refactoring before they can be tested
-  cleanly.
+- `WatchLogFile` and health-route wiring have focused tests. Keep future
+  watcher changes cancellable and avoid hiding watcher startup failures behind
+  successful readiness.
 - Host/upstream label cardinality and `TopHosts.counter` remain unbounded by
   design for now. This has not caused observed production issues; revisit with
   an explicit metric-semantics design before changing dashboard-facing metrics.

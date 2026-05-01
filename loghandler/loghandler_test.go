@@ -46,6 +46,28 @@ func TestNewLogHandlerInitialLoadProcessesExistingLogFile(t *testing.T) {
 	}
 }
 
+func TestNewLogHandlerInitialLoadProcessesRotatedAndCurrentLogFiles(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "querylog.json")
+	writeLogFile(t, logFilePath+".1", queryLogLine("rotated.example", "A", false, 0, 25_000_000, "1.1.1.1"))
+	writeLogFile(t, logFilePath, queryLogLine("current.example", "AAAA", false, 0, 50_000_000, "1.1.1.1"))
+
+	handler := NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+
+	if !handler.fileExists {
+		t.Fatal("expected handler to mark current log file as present")
+	}
+	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 2 {
+		t.Fatalf("expected rotated and current logs to be loaded, got %f DNS queries", got)
+	}
+	if got := testutil.ToFloat64(metrics.QueryTypes.WithLabelValues("A")); got != 1 {
+		t.Fatalf("expected rotated A query to be counted once, got %f", got)
+	}
+	if got := testutil.ToFloat64(metrics.QueryTypes.WithLabelValues("AAAA")); got != 1 {
+		t.Fatalf("expected current AAAA query to be counted once, got %f", got)
+	}
+}
+
 func TestProcessNewLinesOnlyReadsAppendedLines(t *testing.T) {
 	resetMetricsForLogHandlerTest(t)
 	logFilePath := filepath.Join(t.TempDir(), "querylog.json")
@@ -81,6 +103,90 @@ func TestProcessNewLinesSkipsMalformedJSONAndStaysHealthy(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 1 {
 		t.Fatalf("expected only valid JSON line to update metrics, got %f", got)
+	}
+	if got := testutil.ToFloat64(metrics.QueryLogEntriesSkipped.WithLabelValues("invalid_json")); got != 1 {
+		t.Fatalf("expected malformed JSON to increment skipped entries, got %f", got)
+	}
+}
+
+func TestProcessNewLinesSkipsTypedQueryLogRecordsMissingRequiredFields(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "querylog.json")
+	writeLogFile(t, logFilePath,
+		fmt.Sprintf(`{"T":%q,"QT":"A","Elapsed":10000000,"Result":{"IsFiltered":false,"Reason":0}}`, time.Now().Format(time.RFC3339Nano)),
+		queryLogLine("valid.example", "A", false, 0, 10_000_000, "1.1.1.1"),
+	)
+
+	handler := NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+
+	if !handler.IsHealthy() {
+		t.Fatal("expected invalid query log records to be skipped without marking handler unhealthy")
+	}
+	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 1 {
+		t.Fatalf("expected only valid query log record to update metrics, got %f", got)
+	}
+	if got := testutil.ToFloat64(metrics.QueryLogEntriesSkipped.WithLabelValues("missing_query_host")); got != 1 {
+		t.Fatalf("expected missing query host to increment skipped entries, got %f", got)
+	}
+}
+
+func TestProcessNewLinesDefaultsOmittedAllowedReason(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "querylog.json")
+	writeLogFile(t, logFilePath,
+		fmt.Sprintf(
+			`{"T":%q,"QH":"allowed.example","QT":"A","Elapsed":10000000,"Upstream":"1.1.1.1","Result":{}}`,
+			time.Now().Format(time.RFC3339Nano),
+		),
+	)
+
+	NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+
+	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 1 {
+		t.Fatalf("expected omitted reason on allowed query to update metrics, got %f", got)
+	}
+	if got := testutil.ToFloat64(metrics.QueryFilteringReasons.WithLabelValues("not_filtered_not_found")); got != 1 {
+		t.Fatalf("expected omitted allowed reason to default to not filtered, got %f", got)
+	}
+	if got := testutil.ToFloat64(metrics.QueryLogEntriesSkipped.WithLabelValues("missing_reason")); got != 0 {
+		t.Fatalf("expected omitted allowed reason not to be skipped, got %f", got)
+	}
+}
+
+func TestProcessNewLinesSkipsFilteredRecordsMissingReason(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "querylog.json")
+	writeLogFile(t, logFilePath,
+		fmt.Sprintf(
+			`{"T":%q,"QH":"filtered.example","QT":"A","Elapsed":10000000,"Upstream":"1.1.1.1","Result":{"IsFiltered":true}}`,
+			time.Now().Format(time.RFC3339Nano),
+		),
+	)
+
+	NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+
+	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 0 {
+		t.Fatalf("expected filtered query missing reason to be skipped, got %f", got)
+	}
+	if got := testutil.ToFloat64(metrics.QueryLogEntriesSkipped.WithLabelValues("missing_reason")); got != 1 {
+		t.Fatalf("expected filtered query missing reason to increment skipped entries, got %f", got)
+	}
+}
+
+func TestProcessNewLinesAcceptsLegacyTimeField(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "querylog.json")
+	writeLogFile(t, logFilePath,
+		fmt.Sprintf(
+			`{"Time":%q,"QH":"legacy.example","QT":"A","Elapsed":10000000,"Upstream":"1.1.1.1","Result":{"IsFiltered":false,"Reason":0}}`,
+			time.Now().Format(time.RFC3339Nano),
+		),
+	)
+
+	NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+
+	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 1 {
+		t.Fatalf("expected legacy Time field record to update metrics, got %f", got)
 	}
 }
 
@@ -128,7 +234,7 @@ func TestProcessNewLinesResetsOffsetWhenLogIsTruncated(t *testing.T) {
 func TestProcessNewLinesWaitsForPartialFinalLine(t *testing.T) {
 	resetMetricsForLogHandlerTest(t)
 	logFilePath := filepath.Join(t.TempDir(), "querylog.json")
-	partial := `{"QH":"partial.example","QT":"A","Elapsed":10000000,"Upstream":"1.1.1.1","Result":{"IsFiltered":false`
+	partial := fmt.Sprintf(`{"T":%q,"QH":"partial.example","QT":"A","Elapsed":10000000,"Upstream":"1.1.1.1","Result":{"IsFiltered":false`, time.Now().Format(time.RFC3339Nano))
 	if err := os.WriteFile(logFilePath, []byte(partial), 0o600); err != nil {
 		t.Fatalf("write partial log file: %v", err)
 	}
@@ -295,7 +401,8 @@ func queryLogLine(host, queryType string, blocked bool, reason int, elapsedNs in
 	}
 
 	return fmt.Sprintf(
-		`{"QH":%q,"QT":%q,"Elapsed":%d%s,"Result":{"IsFiltered":%t,"Reason":%d}}`,
+		`{"T":%q,"QH":%q,"QT":%q,"Elapsed":%d%s,"Result":{"IsFiltered":%t,"Reason":%d}}`,
+		time.Now().Format(time.RFC3339Nano),
 		host,
 		queryType,
 		elapsedNs,
@@ -307,7 +414,8 @@ func queryLogLine(host, queryType string, blocked bool, reason int, elapsedNs in
 
 func largeQueryLogLine(host, queryType string, answer string) string {
 	return fmt.Sprintf(
-		`{"QH":%q,"QT":%q,"Elapsed":10000000,"Upstream":"1.1.1.1","Answer":%q,"Result":{"IsFiltered":false,"Reason":0}}`,
+		`{"T":%q,"QH":%q,"QT":%q,"Elapsed":10000000,"Upstream":"1.1.1.1","Answer":%q,"Result":{"IsFiltered":false,"Reason":0}}`,
+		time.Now().Format(time.RFC3339Nano),
 		host,
 		queryType,
 		answer,
@@ -367,6 +475,8 @@ func resetMetricsForLogHandlerTest(t *testing.T) {
 	oldTopQueryHosts := metrics.TopQueryHosts
 	oldTopBlockedQueryHosts := metrics.TopBlockedQueryHosts
 	oldSafeSearchEnforcedHosts := metrics.SafeSearchEnforcedHosts
+	oldQueryFilteringReasons := metrics.QueryFilteringReasons
+	oldQueryLogEntriesSkipped := metrics.QueryLogEntriesSkipped
 	oldAverageResponseTime := metrics.AverageResponseTime
 	oldAverageUpstreamResponseTime := metrics.AverageUpstreamResponseTime
 	t.Cleanup(func() {
@@ -376,6 +486,8 @@ func resetMetricsForLogHandlerTest(t *testing.T) {
 		metrics.TopQueryHosts = oldTopQueryHosts
 		metrics.TopBlockedQueryHosts = oldTopBlockedQueryHosts
 		metrics.SafeSearchEnforcedHosts = oldSafeSearchEnforcedHosts
+		metrics.QueryFilteringReasons = oldQueryFilteringReasons
+		metrics.QueryLogEntriesSkipped = oldQueryLogEntriesSkipped
 		metrics.AverageResponseTime = oldAverageResponseTime
 		metrics.AverageUpstreamResponseTime = oldAverageUpstreamResponseTime
 	})
@@ -404,6 +516,14 @@ func resetMetricsForLogHandlerTest(t *testing.T) {
 		Name: "agh_safe_search_enforced_hosts_total",
 		Help: "Safe search enforced hosts",
 	}, []string{"host"})
+	metrics.QueryFilteringReasons = metrics.NewCustomCounterVec(prometheus.CounterOpts{
+		Name: "agh_dns_filtering_reason_total",
+		Help: "DNS query filtering reasons",
+	}, []string{"reason"})
+	metrics.QueryLogEntriesSkipped = metrics.NewCustomCounterVec(prometheus.CounterOpts{
+		Name: "agh_querylog_entries_skipped_total",
+		Help: "Query log entries skipped by reason",
+	}, []string{"reason"})
 	metrics.AverageResponseTime = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "agh_dns_average_response_time",
 		Help: "Average response time for DNS queries in milliseconds",

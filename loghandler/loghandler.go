@@ -45,6 +45,12 @@ func NewLogHandler(logFilePath string, metricsCollector *metrics.MetricsCollecto
 }
 
 func (lh *LogHandler) initialLoad() {
+	rotatedLogFilePath := lh.logFilePath + ".1"
+	if _, err := os.Stat(rotatedLogFilePath); err == nil {
+		log.Printf("Loading rotated log file: %s", rotatedLogFilePath)
+		lh.processHistoricalFile(rotatedLogFilePath)
+	}
+
 	if _, err := os.Stat(lh.logFilePath); err == nil {
 		log.Printf("Loading existing log file: %s", lh.logFilePath)
 		lh.setFileExists(true)
@@ -52,6 +58,33 @@ func (lh *LogHandler) initialLoad() {
 	} else {
 		log.Printf("Waiting for log file: %s", lh.logFilePath)
 	}
+}
+
+func (lh *LogHandler) processHistoricalFile(path string) {
+	file, err := os.Open(path)
+	if err != nil {
+		log.Printf("Error opening historical log file: %v", err)
+		lh.setHealth(false)
+		return
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			lh.processLine(line)
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Printf("Error reading historical log file: %v", err)
+			lh.setHealth(false)
+			return
+		}
+	}
+	lh.setHealth(true)
 }
 
 func (lh *LogHandler) processNewLines() {
@@ -178,16 +211,18 @@ func (lh *LogHandler) processLine(line []byte) {
 		return
 	}
 
-	var data map[string]interface{}
-	if err := json.Unmarshal(line, &data); err != nil {
+	var entry metrics.QueryLogEntry
+	if err := json.Unmarshal(line, &entry); err != nil {
 		log.Printf("Error decoding JSON: %v", err)
+		metrics.QueryLogEntriesSkipped.WithLabelValues("invalid_json").Inc()
 		return
 	}
-	// Ensure Upstream is present and not empty
-	if upstream, ok := data["Upstream"]; !ok || upstream == "" {
-		data["Upstream"] = "unknown"
+	if skipReason := entry.SkipReason(); skipReason != "" {
+		log.Printf("Skipping query log entry: %s", skipReason)
+		metrics.QueryLogEntriesSkipped.WithLabelValues(skipReason).Inc()
+		return
 	}
-	lh.metricsCollector.UpdateMetrics(data)
+	lh.metricsCollector.UpdateMetrics(entry)
 }
 
 func (lh *LogHandler) WatchLogFile(ctx context.Context) error {
