@@ -2,7 +2,6 @@ package metrics
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -34,14 +33,21 @@ var (
 		Name: "agh_safe_search_enforced_hosts_total",
 		Help: "Safe search enforced hosts",
 	}, []string{"host"})
-	// Gauges remain unchanged
+	QueryFilteringReasons = NewCustomCounterVec(prometheus.CounterOpts{
+		Name: "agh_dns_filtering_reason_total",
+		Help: "DNS query filtering reasons",
+	}, []string{"reason"})
+	QueryLogEntriesSkipped = NewCustomCounterVec(prometheus.CounterOpts{
+		Name: "agh_querylog_entries_skipped_total",
+		Help: "Query log entries skipped by reason",
+	}, []string{"reason"})
 	AverageResponseTime = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "agh_dns_average_response_time",
 		Help: "Average response time for DNS queries in milliseconds",
 	})
 	AverageUpstreamResponseTime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "agh_dns_average_upstream_response_time",
-		Help: "Average response time by upstream server",
+		Help: "Average query processing time for queries sent to each upstream server in milliseconds",
 	}, []string{"server"})
 )
 
@@ -65,38 +71,38 @@ func NewMetricsCollector() *MetricsCollector {
 	}
 }
 
-func (mc *MetricsCollector) UpdateMetrics(data map[string]interface{}) {
-	currentTime := time.Now().Unix()
-	host, _ := data["QH"].(string)
-	queryType, _ := data["QT"].(string)
-	result, _ := data["Result"].(map[string]interface{})
-	isBlocked, _ := result["IsFiltered"].(bool)
-	resultReason := fmt.Sprintf("%v", result["Reason"])
-	elapsedNs, _ := data["Elapsed"].(float64)
-	upstream, _ := data["Upstream"].(string)
+func (mc *MetricsCollector) UpdateMetrics(entry QueryLogEntry) {
+	if skipReason := entry.SkipReason(); skipReason != "" {
+		QueryLogEntriesSkipped.WithLabelValues(skipReason).Inc()
+		return
+	}
+	entry.Normalize()
+	currentTime := entry.Timestamp().Unix()
+	reason := *entry.Result.Reason
 
 	DNSQueries.Inc()
-	QueryTypes.WithLabelValues(queryType).Inc()
+	QueryTypes.WithLabelValues(entry.QType).Inc()
+	QueryFilteringReasons.WithLabelValues(reason.Label()).Inc()
 
-	if !isBlocked {
-		mc.topHosts.Add(host)
+	if !entry.Result.IsFiltered {
+		mc.topHosts.Add(entry.QHost)
 	}
 
-	elapsedMs := elapsedNs / 1_000_000 // Convert nanoseconds to milliseconds
+	elapsedMs := entry.ElapsedMilliseconds()
 
 	mc.lock.Lock()
 	mc.responseTimes = append(mc.responseTimes, TimeValue{Time: currentTime, Value: elapsedMs})
 	// Exclude metrics with unknown upstreams
-	if upstream != "unknown" && upstream != "" {
-		mc.upstreamResponseTimes[upstream] = append(mc.upstreamResponseTimes[upstream], TimeValue{Time: currentTime, Value: elapsedMs})
+	if !entry.Cached && entry.Upstream != "unknown" {
+		mc.upstreamResponseTimes[entry.Upstream] = append(mc.upstreamResponseTimes[entry.Upstream], TimeValue{Time: currentTime, Value: elapsedMs})
 	}
 	mc.lock.Unlock()
 
-	if isBlocked && resultReason == "7" {
-		SafeSearchEnforcedHosts.WithLabelValues(host).Inc()
-	} else if isBlocked {
+	if reason.IsSafeSearch() {
+		SafeSearchEnforcedHosts.WithLabelValues(entry.QHost).Inc()
+	} else if reason.IsBlocked() {
 		BlockedQueries.Inc()
-		mc.topBlockedHosts.Add(host)
+		mc.topBlockedHosts.Add(entry.QHost)
 	}
 
 	mc.ProcessMetrics()
