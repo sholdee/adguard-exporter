@@ -8,10 +8,6 @@ on:
   push:
     branches: [master]
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
 jobs:
   detect:
     runs-on: ubuntu-latest
@@ -50,9 +46,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -74,33 +67,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - name: Log in to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Generate tags
-        id: tags
-        env:
-          FULL_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          {
-            echo 'tags<<TAGS_EOF'
-            echo "${FULL_IMAGE}:pr-${PR_NUMBER}"
-            echo 'TAGS_EOF'
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Build and push
-        id: build
+      - name: Build image
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.tags.outputs.tags }}
+          push: false
+          outputs: type=cacheonly
           annotations: |
             index:org.opencontainers.image.description=Prometheus exporter for AdGuard Home query logs
             index:org.opencontainers.image.source=https://github.com/sholdee/adguard-exporter

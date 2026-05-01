@@ -20,8 +20,8 @@ ghcr.io/sholdee/adguard-exporter
 
 Releases are created manually from the GitHub Actions `Publish` workflow. Enter
 a SemVer version such as `2.0.3` or `v2.0.3`; the workflow validates it, runs
-tests, publishes multi-arch images, creates the `vX.Y.Z` git tag, and creates a
-GitHub Release.
+tests, creates the `vX.Y.Z` git tag, publishes multi-arch images, and creates a
+GitHub Release after the image manifests verify.
 
 Each release publishes these image tags:
 
@@ -34,6 +34,12 @@ latest
 
 The `latest` tag points to the latest release, not the latest commit on
 `master`.
+
+If a release run fails partway through, rerun the same workflow with the same
+version. The workflow can resume from a tag-only state or create a missing
+GitHub Release when the expected image tags already exist. If only some exact
+image tags exist, the workflow stops instead of overwriting SemVer tags; clean
+up the partial registry state manually before retrying.
 
 ## Available Metrics
 

@@ -134,6 +134,25 @@ func queryLogEntry(host, queryType string, blocked bool, reason interface{}, ela
 func resetMetricsForTest(t *testing.T) {
 	t.Helper()
 
+	oldDNSQueries := DNSQueries
+	oldBlockedQueries := BlockedQueries
+	oldQueryTypes := QueryTypes
+	oldTopQueryHosts := TopQueryHosts
+	oldTopBlockedQueryHosts := TopBlockedQueryHosts
+	oldSafeSearchEnforcedHosts := SafeSearchEnforcedHosts
+	oldAverageResponseTime := AverageResponseTime
+	oldAverageUpstreamResponseTime := AverageUpstreamResponseTime
+	t.Cleanup(func() {
+		DNSQueries = oldDNSQueries
+		BlockedQueries = oldBlockedQueries
+		QueryTypes = oldQueryTypes
+		TopQueryHosts = oldTopQueryHosts
+		TopBlockedQueryHosts = oldTopBlockedQueryHosts
+		SafeSearchEnforcedHosts = oldSafeSearchEnforcedHosts
+		AverageResponseTime = oldAverageResponseTime
+		AverageUpstreamResponseTime = oldAverageUpstreamResponseTime
+	})
+
 	DNSQueries = NewCustomCounter(prometheus.CounterOpts{
 		Name: "agh_dns_queries_total",
 		Help: "Total number of DNS queries",

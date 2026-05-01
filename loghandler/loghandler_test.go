@@ -146,6 +146,25 @@ func appendLogLine(t *testing.T, path string, line string) {
 func resetMetricsForLogHandlerTest(t *testing.T) {
 	t.Helper()
 
+	oldDNSQueries := metrics.DNSQueries
+	oldBlockedQueries := metrics.BlockedQueries
+	oldQueryTypes := metrics.QueryTypes
+	oldTopQueryHosts := metrics.TopQueryHosts
+	oldTopBlockedQueryHosts := metrics.TopBlockedQueryHosts
+	oldSafeSearchEnforcedHosts := metrics.SafeSearchEnforcedHosts
+	oldAverageResponseTime := metrics.AverageResponseTime
+	oldAverageUpstreamResponseTime := metrics.AverageUpstreamResponseTime
+	t.Cleanup(func() {
+		metrics.DNSQueries = oldDNSQueries
+		metrics.BlockedQueries = oldBlockedQueries
+		metrics.QueryTypes = oldQueryTypes
+		metrics.TopQueryHosts = oldTopQueryHosts
+		metrics.TopBlockedQueryHosts = oldTopBlockedQueryHosts
+		metrics.SafeSearchEnforcedHosts = oldSafeSearchEnforcedHosts
+		metrics.AverageResponseTime = oldAverageResponseTime
+		metrics.AverageUpstreamResponseTime = oldAverageUpstreamResponseTime
+	})
+
 	metrics.DNSQueries = metrics.NewCustomCounter(prometheus.CounterOpts{
 		Name: "agh_dns_queries_total",
 		Help: "Total number of DNS queries",

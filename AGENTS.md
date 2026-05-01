@@ -123,8 +123,14 @@ git config core.hooksPath .githooks
 - Docker builds target `linux/amd64` and `linux/arm64`.
 - Docker Hub publishing expects `DOCKER_USERNAME` and `DOCKER_PASSWORD`.
 - GHCR publishing uses `GITHUB_TOKEN`.
-- The publish workflow creates the git tag and GitHub Release after image
-  manifests verify.
+- The publish workflow creates the git tag before image publication, then
+  creates the GitHub Release after image manifests verify.
+- The publish workflow can resume from a tag-only state or create a missing
+  release when expected image tags already exist. It intentionally fails on
+  partial exact image tags to avoid mutating SemVer tags during recovery.
+- The distroless runtime image is cosign-verified in CI. The Go builder image is
+  pinned by digest; Docker Hub does not provide the same keyless verification
+  signal used by distroless.
 
 ## Current Gaps To Keep In Mind
 
