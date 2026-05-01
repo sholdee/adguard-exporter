@@ -18,12 +18,8 @@ sholdee/adguardexporter
 ghcr.io/sholdee/adguard-exporter
 ```
 
-Releases are created manually from the GitHub Actions `Publish` workflow. Enter
-a SemVer version such as `2.0.3` or `v2.0.3`; the workflow validates it, runs
-tests, creates the `vX.Y.Z` git tag, publishes multi-arch images, and creates a
-GitHub Release after the image manifests verify.
-
-Each release publishes these image tags:
+Published images support `linux/amd64` and `linux/arm64`. Releases publish
+these tags:
 
 ```text
 vX.Y.Z
@@ -35,12 +31,6 @@ latest
 The `latest` tag points to the latest release, not the latest commit on
 `master`.
 
-If a release run fails partway through, rerun the same workflow with the same
-version. The workflow can resume from a tag-only state or create a missing
-GitHub Release when the expected image tags already exist. If only some exact
-image tags exist, the workflow stops instead of overwriting SemVer tags; clean
-up the partial registry state manually before retrying.
-
 ## Available Metrics
 
 ```text
@@ -51,6 +41,7 @@ agh_dns_query_hosts_total: Top 100 DNS query hosts
 agh_blocked_dns_query_hosts_total: Top 100 blocked DNS query hosts
 agh_safe_search_enforced_hosts_total: Safe search enforced hosts
 agh_dns_filtering_reason_total: DNS query filtering reasons
+agh_dns_filtering_reason_hosts_total: Top 100 filtered hosts by reason
 agh_querylog_entries_skipped_total: Query log entries skipped by reason
 agh_dns_average_response_time: Average response time of all queries in ms
 agh_dns_average_upstream_response_time: Query processing time by upstream in ms
@@ -59,6 +50,14 @@ agh_dns_average_upstream_response_time: Query processing time by upstream in ms
 The upstream timing metric keeps its historical name, but it is based on
 querylog `Elapsed` grouped by `Upstream`; AdGuard Home querylog records do not
 include pure upstream round-trip duration.
+
+## Grafana Dashboard
+
+The dashboard JSON is versioned in
+[dashboards/adguard-exporter.v2.json][dashboard-source]. It uses Grafana's V2
+JSON model, range-based counter queries for dashboard totals, filtering reason
+and skipped querylog record metrics, and upstream timing labeled as query
+processing time rather than pure upstream round-trip duration.
 
 ## How To Use This Container
 
@@ -289,3 +288,4 @@ spec:
 
 [dashboard-image]: assets/img/agh-grafana-dash.png
 [dashboard-link]: https://grafana.com/grafana/dashboards/21403
+[dashboard-source]: dashboards/adguard-exporter.v2.json

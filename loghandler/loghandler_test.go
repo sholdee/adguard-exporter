@@ -474,6 +474,7 @@ func resetMetricsForLogHandlerTest(t *testing.T) {
 	oldQueryTypes := metrics.QueryTypes
 	oldTopQueryHosts := metrics.TopQueryHosts
 	oldTopBlockedQueryHosts := metrics.TopBlockedQueryHosts
+	oldTopFilteringReasonHosts := metrics.TopFilteringReasonHosts
 	oldSafeSearchEnforcedHosts := metrics.SafeSearchEnforcedHosts
 	oldQueryFilteringReasons := metrics.QueryFilteringReasons
 	oldQueryLogEntriesSkipped := metrics.QueryLogEntriesSkipped
@@ -485,6 +486,7 @@ func resetMetricsForLogHandlerTest(t *testing.T) {
 		metrics.QueryTypes = oldQueryTypes
 		metrics.TopQueryHosts = oldTopQueryHosts
 		metrics.TopBlockedQueryHosts = oldTopBlockedQueryHosts
+		metrics.TopFilteringReasonHosts = oldTopFilteringReasonHosts
 		metrics.SafeSearchEnforcedHosts = oldSafeSearchEnforcedHosts
 		metrics.QueryFilteringReasons = oldQueryFilteringReasons
 		metrics.QueryLogEntriesSkipped = oldQueryLogEntriesSkipped
@@ -512,6 +514,10 @@ func resetMetricsForLogHandlerTest(t *testing.T) {
 		Name: "agh_blocked_dns_query_hosts_total",
 		Help: "Top blocked DNS query hosts",
 	}, []string{"host"})
+	metrics.TopFilteringReasonHosts = metrics.NewCustomCounterVec(prometheus.CounterOpts{
+		Name: "agh_dns_filtering_reason_hosts_total",
+		Help: "Top DNS filtering reason hosts",
+	}, []string{"host", "reason"})
 	metrics.SafeSearchEnforcedHosts = metrics.NewCustomCounterVec(prometheus.CounterOpts{
 		Name: "agh_safe_search_enforced_hosts_total",
 		Help: "Safe search enforced hosts",
