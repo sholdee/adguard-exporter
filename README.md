@@ -60,6 +60,14 @@ The upstream timing metric keeps its historical name, but it is based on
 querylog `Elapsed` grouped by `Upstream`; AdGuard Home querylog records do not
 include pure upstream round-trip duration.
 
+## Grafana Dashboard
+
+The dashboard JSON is versioned in
+[dashboards/adguard-exporter.v2.json][dashboard-source]. It uses Grafana's V2
+JSON model, range-based counter queries for dashboard totals, filtering reason
+and skipped querylog record metrics, and upstream timing labeled as query
+processing time rather than pure upstream round-trip duration.
+
 ## How To Use This Container
 
 Configure AdGuard Home to dump query logs to disk at a regular interval by
@@ -289,3 +297,4 @@ spec:
 
 [dashboard-image]: assets/img/agh-grafana-dash.png
 [dashboard-link]: https://grafana.com/grafana/dashboards/21403
+[dashboard-source]: dashboards/adguard-exporter.v2.json
