@@ -1,37 +1,27 @@
-FROM golang:1.26.2-alpine3.22 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26.2@sha256:b54cbf583d390341599d7bcbc062425c081105cc5ef6d170ced98ef9d047c716 AS builder
+ARG TARGETOS TARGETARCH
 
 WORKDIR /app
 
-# Copy go mod and sum files
 COPY go.mod go.sum ./
-
-# Download all dependencies
 RUN go mod download
 
-# Copy the source code
 COPY . ./
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /adguard-exporter .
 
-# Build the application with static linking
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o adguard-exporter .
+FROM gcr.io/distroless/static:nonroot@sha256:e3f945647ffb95b5839c07038d64f9811adf17308b9121d8a2b87b6a22a80a39
+LABEL org.opencontainers.image.title="adguard-exporter"
+LABEL org.opencontainers.image.description="Prometheus exporter for AdGuard Home query logs"
+LABEL org.opencontainers.image.source="https://github.com/sholdee/adguard-exporter"
 
-# Use distroless as the base image
-FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=builder /adguard-exporter /adguard-exporter
 
-WORKDIR /app
-
-# Copy the binary from the builder stage
-COPY --from=builder /app/adguard-exporter .
-
-# Expose the metrics port
 EXPOSE 8000
 
-# Set environment variables (can be overridden at runtime)
 ENV LOG_FILE_PATH=/opt/adguardhome/work/data/querylog.json
 ENV METRICS_PORT=8000
 ENV LOG_LEVEL=INFO
 
-# Use the nonroot user
 USER nonroot:nonroot
 
-# Run the exporter
-CMD ["./adguard-exporter"]
+ENTRYPOINT ["/adguard-exporter"]

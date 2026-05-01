@@ -64,7 +64,11 @@ func (h HostCountHeap) Less(i, j int) bool { return h[i].Count < h[j].Count }
 func (h HostCountHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 
 func (h *HostCountHeap) Push(x interface{}) {
-	*h = append(*h, x.(HostCount))
+	hostCount, ok := x.(HostCount)
+	if !ok {
+		panic("HostCountHeap.Push received non-HostCount value")
+	}
+	*h = append(*h, hostCount)
 }
 
 func (h *HostCountHeap) Pop() interface{} {
