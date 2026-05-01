@@ -51,6 +51,7 @@ agh_dns_query_hosts_total: Top 100 DNS query hosts
 agh_blocked_dns_query_hosts_total: Top 100 blocked DNS query hosts
 agh_safe_search_enforced_hosts_total: Safe search enforced hosts
 agh_dns_filtering_reason_total: DNS query filtering reasons
+agh_dns_filtering_reason_hosts_total: Top 100 filtered hosts by reason
 agh_querylog_entries_skipped_total: Query log entries skipped by reason
 agh_dns_average_response_time: Average response time of all queries in ms
 agh_dns_average_upstream_response_time: Query processing time by upstream in ms

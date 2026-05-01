@@ -114,6 +114,20 @@ func (r FilteringReason) IsBlocked() bool {
 	return r == ReasonFilteredBlockList || r == ReasonFilteredBlockedService
 }
 
+func (r FilteringReason) IsFiltered() bool {
+	switch r {
+	case ReasonFilteredBlockList,
+		ReasonFilteredSafeBrowsing,
+		ReasonFilteredParental,
+		ReasonFilteredInvalid,
+		ReasonFilteredSafeSearch,
+		ReasonFilteredBlockedService:
+		return true
+	default:
+		return false
+	}
+}
+
 func (r FilteringReason) IsSafeSearch() bool {
 	return r == ReasonFilteredSafeSearch
 }

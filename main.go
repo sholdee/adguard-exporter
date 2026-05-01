@@ -35,6 +35,7 @@ func main() {
 	prometheus.MustRegister(metrics.QueryTypes.CounterVec, metrics.QueryTypes.CreatedVec)
 	prometheus.MustRegister(metrics.TopQueryHosts.CounterVec, metrics.TopQueryHosts.CreatedVec)
 	prometheus.MustRegister(metrics.TopBlockedQueryHosts.CounterVec, metrics.TopBlockedQueryHosts.CreatedVec)
+	prometheus.MustRegister(metrics.TopFilteringReasonHosts.CounterVec, metrics.TopFilteringReasonHosts.CreatedVec)
 	prometheus.MustRegister(metrics.SafeSearchEnforcedHosts.CounterVec, metrics.SafeSearchEnforcedHosts.CreatedVec)
 	prometheus.MustRegister(metrics.QueryFilteringReasons.CounterVec, metrics.QueryFilteringReasons.CreatedVec)
 	prometheus.MustRegister(metrics.QueryLogEntriesSkipped.CounterVec, metrics.QueryLogEntriesSkipped.CreatedVec)

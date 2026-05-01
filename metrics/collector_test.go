@@ -82,6 +82,30 @@ func TestUpdateMetricsTracksBlockedQuerySeparately(t *testing.T) {
 	}
 }
 
+func TestUpdateMetricsTracksFilteredHostReasons(t *testing.T) {
+	resetMetricsForTest(t)
+	collector := NewMetricsCollector()
+
+	collector.UpdateMetrics(queryLogEntry("blocked.example", "A", true, ReasonFilteredBlockList, 10_000_000, "9.9.9.9"))
+	collector.UpdateMetrics(queryLogEntry("blocked.example", "A", true, ReasonFilteredBlockList, 20_000_000, "9.9.9.9"))
+	collector.UpdateMetrics(queryLogEntry("safe.example", "A", true, ReasonFilteredSafeSearch, 15_000_000, "8.8.8.8"))
+	collector.UpdateMetrics(queryLogEntry("allowed.example", "A", false, ReasonNotFilteredNotFound, 25_000_000, "1.1.1.1"))
+	collector.UpdateMetrics(queryLogEntry("rewritten.example", "A", false, ReasonRewritten, 25_000_000, "1.1.1.1"))
+
+	if got := testutil.ToFloat64(TopFilteringReasonHosts.WithLabelValues("blocked.example", "filtered_blocklist")); got != 2 {
+		t.Fatalf("expected blocked host reason count 2, got %f", got)
+	}
+	if got := testutil.ToFloat64(TopFilteringReasonHosts.WithLabelValues("safe.example", "filtered_safe_search")); got != 1 {
+		t.Fatalf("expected safe search host reason count 1, got %f", got)
+	}
+	if got := testutil.ToFloat64(TopFilteringReasonHosts.WithLabelValues("allowed.example", "not_filtered_not_found")); got != 0 {
+		t.Fatalf("expected allowed host not to be counted by filtered host reasons, got %f", got)
+	}
+	if got := testutil.ToFloat64(TopFilteringReasonHosts.WithLabelValues("rewritten.example", "rewritten")); got != 0 {
+		t.Fatalf("expected rewritten host not to be counted by filtered host reasons, got %f", got)
+	}
+}
+
 func TestUpdateMetricsTracksSafeSearchSeparatelyFromBlockedQueries(t *testing.T) {
 	resetMetricsForTest(t)
 	collector := NewMetricsCollector()
@@ -311,6 +335,7 @@ func resetMetricsForTest(t *testing.T) {
 	oldQueryTypes := QueryTypes
 	oldTopQueryHosts := TopQueryHosts
 	oldTopBlockedQueryHosts := TopBlockedQueryHosts
+	oldTopFilteringReasonHosts := TopFilteringReasonHosts
 	oldSafeSearchEnforcedHosts := SafeSearchEnforcedHosts
 	oldQueryFilteringReasons := QueryFilteringReasons
 	oldQueryLogEntriesSkipped := QueryLogEntriesSkipped
@@ -322,6 +347,7 @@ func resetMetricsForTest(t *testing.T) {
 		QueryTypes = oldQueryTypes
 		TopQueryHosts = oldTopQueryHosts
 		TopBlockedQueryHosts = oldTopBlockedQueryHosts
+		TopFilteringReasonHosts = oldTopFilteringReasonHosts
 		SafeSearchEnforcedHosts = oldSafeSearchEnforcedHosts
 		QueryFilteringReasons = oldQueryFilteringReasons
 		QueryLogEntriesSkipped = oldQueryLogEntriesSkipped
@@ -349,6 +375,10 @@ func resetMetricsForTest(t *testing.T) {
 		Name: "agh_blocked_dns_query_hosts_total",
 		Help: "Top blocked DNS query hosts",
 	}, []string{"host"})
+	TopFilteringReasonHosts = NewCustomCounterVec(prometheus.CounterOpts{
+		Name: "agh_dns_filtering_reason_hosts_total",
+		Help: "Top DNS filtering reason hosts",
+	}, []string{"host", "reason"})
 	SafeSearchEnforcedHosts = NewCustomCounterVec(prometheus.CounterOpts{
 		Name: "agh_safe_search_enforced_hosts_total",
 		Help: "Safe search enforced hosts",

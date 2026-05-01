@@ -29,6 +29,10 @@ var (
 		Name: "agh_blocked_dns_query_hosts_total",
 		Help: "Top blocked DNS query hosts",
 	}, []string{"host"})
+	TopFilteringReasonHosts = NewCustomCounterVec(prometheus.CounterOpts{
+		Name: "agh_dns_filtering_reason_hosts_total",
+		Help: "Top DNS filtering reason hosts",
+	}, []string{"host", "reason"})
 	SafeSearchEnforcedHosts = NewCustomCounterVec(prometheus.CounterOpts{
 		Name: "agh_safe_search_enforced_hosts_total",
 		Help: "Safe search enforced hosts",
@@ -52,22 +56,24 @@ var (
 )
 
 type MetricsCollector struct {
-	topHosts              *TopHosts
-	topBlockedHosts       *TopHosts
-	responseTimes         []TimeValue
-	upstreamResponseTimes map[string][]TimeValue
-	windowSize            int64
-	processLock           sync.Mutex
-	lock                  sync.Mutex
+	topHosts                *TopHosts
+	topBlockedHosts         *TopHosts
+	topFilteringReasonHosts *TopHostReasons
+	responseTimes           []TimeValue
+	upstreamResponseTimes   map[string][]TimeValue
+	windowSize              int64
+	processLock             sync.Mutex
+	lock                    sync.Mutex
 }
 
 func NewMetricsCollector() *MetricsCollector {
 	return &MetricsCollector{
-		topHosts:              NewTopHosts(100),
-		topBlockedHosts:       NewTopHosts(100),
-		responseTimes:         make([]TimeValue, 0),
-		upstreamResponseTimes: make(map[string][]TimeValue),
-		windowSize:            300, // 5 minute window
+		topHosts:                NewTopHosts(100),
+		topBlockedHosts:         NewTopHosts(100),
+		topFilteringReasonHosts: NewTopHostReasons(100),
+		responseTimes:           make([]TimeValue, 0),
+		upstreamResponseTimes:   make(map[string][]TimeValue),
+		windowSize:              300, // 5 minute window
 	}
 }
 
@@ -103,6 +109,9 @@ func (mc *MetricsCollector) UpdateMetrics(entry QueryLogEntry) {
 	} else if reason.IsBlocked() {
 		BlockedQueries.Inc()
 		mc.topBlockedHosts.Add(entry.QHost)
+	}
+	if reason.IsFiltered() {
+		mc.topFilteringReasonHosts.Add(entry.QHost, reason.Label())
 	}
 
 	mc.ProcessMetrics()
@@ -146,6 +155,11 @@ func (mc *MetricsCollector) ProcessMetrics() {
 	TopBlockedQueryHosts.CounterVec.Reset()
 	for _, hc := range mc.topBlockedHosts.GetTop() {
 		TopBlockedQueryHosts.WithLabelValues(hc.Host).Add(float64(hc.Count))
+	}
+
+	TopFilteringReasonHosts.CounterVec.Reset()
+	for _, hc := range mc.topFilteringReasonHosts.GetTop() {
+		TopFilteringReasonHosts.WithLabelValues(hc.Host, hc.Reason).Add(float64(hc.Count))
 	}
 
 	mc.lock.Lock()
