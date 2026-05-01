@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -50,6 +51,7 @@ type MetricsCollector struct {
 	responseTimes         []TimeValue
 	upstreamResponseTimes map[string][]TimeValue
 	windowSize            int64
+	processLock           sync.Mutex
 	lock                  sync.Mutex
 }
 
@@ -100,7 +102,33 @@ func (mc *MetricsCollector) UpdateMetrics(data map[string]interface{}) {
 	mc.ProcessMetrics()
 }
 
+func (mc *MetricsCollector) StartProcessing(ctx context.Context, interval time.Duration) <-chan struct{} {
+	done := make(chan struct{})
+	if interval <= 0 {
+		close(done)
+		return done
+	}
+
+	ticker := time.NewTicker(interval)
+	go func() {
+		defer close(done)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				mc.ProcessMetrics()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return done
+}
+
 func (mc *MetricsCollector) ProcessMetrics() {
+	mc.processLock.Lock()
+	defer mc.processLock.Unlock()
+
 	currentTime := time.Now().Unix()
 	cutoffTime := currentTime - mc.windowSize
 
@@ -121,8 +149,11 @@ func (mc *MetricsCollector) ProcessMetrics() {
 	if len(recentResponseTimes) > 0 {
 		avgResponseTime := mc.calculateAverage(recentResponseTimes)
 		AverageResponseTime.Set(avgResponseTime)
+	} else {
+		AverageResponseTime.Set(0)
 	}
 
+	recentUpstreamResponseTimes := make(map[string][]TimeValue, len(mc.upstreamResponseTimes))
 	for upstream, times := range mc.upstreamResponseTimes {
 		if upstream == "unknown" || upstream == "" {
 			continue // Skip processing for unknown upstreams
@@ -131,13 +162,14 @@ func (mc *MetricsCollector) ProcessMetrics() {
 		if len(recentTimes) > 0 {
 			avgUpstreamTime := mc.calculateAverage(recentTimes)
 			AverageUpstreamResponseTime.WithLabelValues(upstream).Set(avgUpstreamTime)
+			recentUpstreamResponseTimes[upstream] = recentTimes
+		} else {
+			AverageUpstreamResponseTime.DeleteLabelValues(upstream)
 		}
 	}
 
 	mc.responseTimes = recentResponseTimes
-	for upstream := range mc.upstreamResponseTimes {
-		mc.upstreamResponseTimes[upstream] = mc.filterRecentTimes(mc.upstreamResponseTimes[upstream], cutoffTime)
-	}
+	mc.upstreamResponseTimes = recentUpstreamResponseTimes
 }
 
 func (mc *MetricsCollector) filterRecentTimes(times []TimeValue, cutoffTime int64) []TimeValue {

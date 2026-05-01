@@ -138,5 +138,8 @@ git config core.hooksPath .githooks
   processing behavior. Add focused tests before behavior changes.
 - `WatchLogFile` and `main` still need refactoring before they can be tested
   cleanly.
+- Host/upstream label cardinality and `TopHosts.counter` remain unbounded by
+  design for now. This has not caused observed production issues; revisit with
+  an explicit metric-semantics design before changing dashboard-facing metrics.
 - The exporter is intentionally file-log based; adding API calls or Kubernetes
   clients should be treated as a scope expansion.

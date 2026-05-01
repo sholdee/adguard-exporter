@@ -2,6 +2,7 @@ package loghandler
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"log"
@@ -13,10 +14,13 @@ import (
 	"github.com/sholdee/adguard-exporter/metrics"
 )
 
+const logFingerprintBytes = 4096
+
 type LogHandler struct {
 	logFilePath      string
 	metricsCollector *metrics.MetricsCollector
 	lastPosition     int64
+	lastFingerprint  []byte
 	healthStatus     bool
 	fileExists       bool
 	lock             sync.Mutex
@@ -36,7 +40,7 @@ func NewLogHandler(logFilePath string, metricsCollector *metrics.MetricsCollecto
 func (lh *LogHandler) initialLoad() {
 	if _, err := os.Stat(lh.logFilePath); err == nil {
 		log.Printf("Loading existing log file: %s", lh.logFilePath)
-		lh.fileExists = true
+		lh.setFileExists(true)
 		lh.processNewLines()
 	} else {
 		log.Printf("Waiting for log file: %s", lh.logFilePath)
@@ -55,6 +59,18 @@ func (lh *LogHandler) processNewLines() {
 	}
 	defer file.Close()
 
+	info, err := file.Stat()
+	if err != nil {
+		log.Printf("Error stating log file: %v", err)
+		lh.healthStatus = false
+		return
+	}
+	if err := lh.ensureReadPosition(file, info.Size()); err != nil {
+		log.Printf("Error verifying log file position: %v", err)
+		lh.healthStatus = false
+		return
+	}
+
 	_, err = file.Seek(lh.lastPosition, io.SeekStart)
 	if err != nil {
 		log.Printf("Error seeking in log file: %v", err)
@@ -62,28 +78,109 @@ func (lh *LogHandler) processNewLines() {
 		return
 	}
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		var data map[string]interface{}
-		if err := json.Unmarshal(scanner.Bytes(), &data); err != nil {
-			log.Printf("Error decoding JSON: %v", err)
+	reader := bufio.NewReader(file)
+	position := lh.lastPosition
+	for {
+		lineStart := position
+		line, err := reader.ReadBytes('\n')
+		if err == nil {
+			lh.processLine(line)
+			position += int64(len(line))
 			continue
 		}
-		// Ensure Upstream is present and not empty
-		if upstream, ok := data["Upstream"]; !ok || upstream == "" {
-			data["Upstream"] = "unknown"
-		}
-		lh.metricsCollector.UpdateMetrics(data)
-	}
 
-	if err := scanner.Err(); err != nil {
+		if err == io.EOF {
+			if len(line) > 0 {
+				position = lineStart
+			}
+			break
+		}
+
 		log.Printf("Error reading log file: %v", err)
 		lh.healthStatus = false
 		return
 	}
 
-	lh.lastPosition, _ = file.Seek(0, io.SeekCurrent)
+	lh.lastPosition = position
+	if err := lh.refreshFingerprint(file); err != nil {
+		log.Printf("Error recording log file fingerprint: %v", err)
+		lh.healthStatus = false
+		return
+	}
 	lh.healthStatus = true
+}
+
+func (lh *LogHandler) ensureReadPosition(file *os.File, size int64) error {
+	if lh.lastPosition == 0 {
+		return nil
+	}
+	if size < lh.lastPosition {
+		log.Printf("Log file was truncated; resetting read position from %d to 0", lh.lastPosition)
+		lh.resetReadPosition()
+		return nil
+	}
+	if len(lh.lastFingerprint) == 0 {
+		return nil
+	}
+
+	fingerprint, err := readLogFingerprint(file, lh.lastPosition)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(fingerprint, lh.lastFingerprint) {
+		log.Printf("Log file changed before read position; resetting read position from %d to 0", lh.lastPosition)
+		lh.resetReadPosition()
+	}
+	return nil
+}
+
+func (lh *LogHandler) refreshFingerprint(file *os.File) error {
+	fingerprint, err := readLogFingerprint(file, lh.lastPosition)
+	if err != nil {
+		return err
+	}
+	lh.lastFingerprint = fingerprint
+	return nil
+}
+
+func (lh *LogHandler) resetReadPosition() {
+	lh.lastPosition = 0
+	lh.lastFingerprint = nil
+}
+
+func readLogFingerprint(file *os.File, position int64) ([]byte, error) {
+	if position <= 0 {
+		return nil, nil
+	}
+
+	length := int64(logFingerprintBytes)
+	if position < length {
+		length = position
+	}
+
+	fingerprint := make([]byte, length)
+	n, err := file.ReadAt(fingerprint, position-length)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	return fingerprint[:n], nil
+}
+
+func (lh *LogHandler) processLine(line []byte) {
+	if len(line) == 0 {
+		return
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(line, &data); err != nil {
+		log.Printf("Error decoding JSON: %v", err)
+		return
+	}
+	// Ensure Upstream is present and not empty
+	if upstream, ok := data["Upstream"]; !ok || upstream == "" {
+		data["Upstream"] = "unknown"
+	}
+	lh.metricsCollector.UpdateMetrics(data)
 }
 
 func (lh *LogHandler) WatchLogFile() {
@@ -108,15 +205,14 @@ func (lh *LogHandler) WatchLogFile() {
 					lh.processNewLines()
 				} else if event.Op&fsnotify.Create == fsnotify.Create {
 					log.Printf("Log file created: %s", event.Name)
-					lh.fileExists = true
-					lh.lastPosition = 0
+					lh.resetForCreatedFile()
 					lh.processNewLines()
 				}
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return
 				}
-				lh.healthStatus = false
+				lh.setHealth(false)
 				log.Println("error:", err)
 			}
 		}
@@ -135,4 +231,24 @@ func (lh *LogHandler) IsHealthy() bool {
 	lh.lock.Lock()
 	defer lh.lock.Unlock()
 	return lh.healthStatus
+}
+
+func (lh *LogHandler) setHealth(healthy bool) {
+	lh.lock.Lock()
+	defer lh.lock.Unlock()
+	lh.healthStatus = healthy
+}
+
+func (lh *LogHandler) setFileExists(exists bool) {
+	lh.lock.Lock()
+	defer lh.lock.Unlock()
+	lh.fileExists = exists
+}
+
+func (lh *LogHandler) resetForCreatedFile() {
+	lh.lock.Lock()
+	defer lh.lock.Unlock()
+	lh.fileExists = true
+	lh.resetReadPosition()
+	lh.healthStatus = true
 }
