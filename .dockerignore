@@ -1,6 +1,9 @@
 Dockerfile
-LICENSE
 README.md
 assets/
 .github/
 .git/
+.githooks/
+.golangci.yml
+AGENTS.md
+coverage.txt

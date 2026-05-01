@@ -91,7 +91,6 @@ func (lh *LogHandler) WatchLogFile() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer watcher.Close()
 
 	done := make(chan bool)
 	go func() {
@@ -101,10 +100,10 @@ func (lh *LogHandler) WatchLogFile() {
 				if !ok {
 					return
 				}
-                // Check if the event is for our specific file
-                if filepath.Base(event.Name) != filepath.Base(lh.logFilePath) {
-                    continue // Ignore events for other files
-                }
+				// Check if the event is for our specific file
+				if filepath.Base(event.Name) != filepath.Base(lh.logFilePath) {
+					continue // Ignore events for other files
+				}
 				if event.Op&fsnotify.Write == fsnotify.Write {
 					lh.processNewLines()
 				} else if event.Op&fsnotify.Create == fsnotify.Create {
@@ -125,8 +124,10 @@ func (lh *LogHandler) WatchLogFile() {
 
 	err = watcher.Add(filepath.Dir(lh.logFilePath))
 	if err != nil {
+		_ = watcher.Close()
 		log.Fatal(err)
 	}
+	defer watcher.Close()
 	<-done
 }
 

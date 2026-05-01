@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+
+gofmt -w $(find . -name '*.go' -not -path './.git/*')
+go test ./...

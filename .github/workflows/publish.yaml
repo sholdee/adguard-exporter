@@ -1,0 +1,238 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'SemVer release version, with or without v prefix'
+        required: true
+        type: string
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+env:
+  DOCKERHUB_IMAGE: sholdee/adguardexporter
+  GHCR_IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Verify branch
+        if: github.ref != 'refs/heads/master'
+        run: |
+          echo "ERROR: Publish workflow must run on master branch, got ${GITHUB_REF}"
+          exit 1
+
+  test:
+    needs: [guard]
+    uses: ./.github/workflows/test.yml
+
+  publish:
+    needs: [test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Verify base images
+        run: |
+          DISTROLESS_REF=$(grep '^FROM gcr.io/distroless/' Dockerfile | awk '{print $2}')
+          echo "Verifying ${DISTROLESS_REF}"
+          cosign verify "${DISTROLESS_REF}" \
+            --certificate-oidc-issuer https://accounts.google.com \
+            --certificate-identity keyless@distroless.iam.gserviceaccount.com
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate version and tags
+        id: tags
+        env:
+          DOCKERHUB_IMAGE: ${{ env.DOCKERHUB_IMAGE }}
+          GHCR_IMAGE: ${{ env.GHCR_IMAGE }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          created="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          semver="${INPUT_VERSION#v}"
+          if [[ ! "${semver}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "ERROR: version must be SemVer in X.Y.Z or vX.Y.Z form, got '${INPUT_VERSION}'"
+            exit 1
+          fi
+
+          version="v${semver}"
+          minor="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+
+          {
+            echo "created=${created}"
+            echo "version=${version}"
+            echo "semver=${semver}"
+            echo "minor=${minor}"
+            echo "primary-tag=${version}"
+            echo 'tags<<TAGS_EOF'
+            for image in "${DOCKERHUB_IMAGE}" "${GHCR_IMAGE}"; do
+              for tag in "${version}" "${semver}" "${minor}" latest; do
+                echo "${image}:${tag}"
+              done
+            done
+            echo 'TAGS_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Preflight release state
+        id: preflight
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKERHUB_IMAGE: ${{ env.DOCKERHUB_IMAGE }}
+          GHCR_IMAGE: ${{ env.GHCR_IMAGE }}
+          VERSION: ${{ steps.tags.outputs.version }}
+          SEMVER: ${{ steps.tags.outputs.semver }}
+        run: |
+          tag_sha="$(git ls-remote --tags origin "refs/tags/${VERSION}" | awk '{print $1}')"
+          tag_exists=false
+          if [[ -n "${tag_sha}" ]]; then
+            tag_exists=true
+            if [[ "${tag_sha}" != "${GITHUB_SHA}" ]]; then
+              echo "ERROR: release tag ${VERSION} already exists at ${tag_sha}, expected ${GITHUB_SHA}"
+              exit 1
+            fi
+          fi
+
+          if gh release view "${VERSION}" >/dev/null 2>&1; then
+            echo "ERROR: GitHub Release ${VERSION} already exists"
+            exit 1
+          fi
+
+          existing_exact_tags=0
+          for image in "${DOCKERHUB_IMAGE}" "${GHCR_IMAGE}"; do
+            for tag in "${VERSION}" "${SEMVER}"; do
+              if docker buildx imagetools inspect "${image}:${tag}" >/dev/null 2>&1; then
+                existing_exact_tags=$((existing_exact_tags + 1))
+              fi
+            done
+          done
+
+          if [[ "${tag_exists}" == "false" && "${existing_exact_tags}" -gt 0 ]]; then
+            echo "ERROR: exact release image tag already exists, but git tag ${VERSION} does not"
+            exit 1
+          fi
+
+          release_only=false
+          if [[ "${tag_exists}" == "true" ]]; then
+            if [[ "${existing_exact_tags}" -eq 0 ]]; then
+              echo "Found existing git tag ${VERSION}; resuming before image publication"
+            elif [[ "${existing_exact_tags}" -eq 4 ]]; then
+              release_only=true
+              echo "Found existing git tag and exact image tags for ${VERSION}; creating release only"
+            else
+              echo "ERROR: partial exact image tags found for ${VERSION}; manual registry cleanup required"
+              exit 1
+            fi
+          fi
+
+          {
+            echo "tag-exists=${tag_exists}"
+            echo "release-only=${release_only}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Git tag
+        if: steps.preflight.outputs.tag-exists != 'true'
+        env:
+          VERSION: ${{ steps.tags.outputs.version }}
+        run: |
+          git tag "${VERSION}"
+          git push origin "${VERSION}"
+
+      - name: Build and push
+        if: steps.preflight.outputs.release-only != 'true'
+        id: build
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          annotations: |
+            index:org.opencontainers.image.description=Prometheus exporter for AdGuard Home query logs
+            index:org.opencontainers.image.source=https://github.com/sholdee/adguard-exporter
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.tags.outputs.version }}
+            org.opencontainers.image.created=${{ steps.tags.outputs.created }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify Docker manifests
+        env:
+          DOCKERHUB_IMAGE: ${{ env.DOCKERHUB_IMAGE }}
+          GHCR_IMAGE: ${{ env.GHCR_IMAGE }}
+          VERSION: ${{ steps.tags.outputs.version }}
+          SEMVER: ${{ steps.tags.outputs.semver }}
+          MINOR: ${{ steps.tags.outputs.minor }}
+        run: |
+          for image in "${DOCKERHUB_IMAGE}" "${GHCR_IMAGE}"; do
+            for tag in "${VERSION}" "${SEMVER}" "${MINOR}" latest; do
+              docker buildx imagetools inspect "${image}:${tag}"
+            done
+          done
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.tags.outputs.version }}
+          SEMVER: ${{ steps.tags.outputs.semver }}
+          MINOR: ${{ steps.tags.outputs.minor }}
+          DOCKERHUB_IMAGE: ${{ env.DOCKERHUB_IMAGE }}
+          GHCR_IMAGE: ${{ env.GHCR_IMAGE }}
+        run: |
+          NOTES=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="${VERSION}" \
+            --jq '.body')
+
+          IMAGE_NOTES=$(cat <<EOF
+          **Images:**
+          - \`${DOCKERHUB_IMAGE}:${VERSION}\`
+          - \`${DOCKERHUB_IMAGE}:${SEMVER}\`
+          - \`${DOCKERHUB_IMAGE}:${MINOR}\`
+          - \`${DOCKERHUB_IMAGE}:latest\`
+          - \`${GHCR_IMAGE}:${VERSION}\`
+          - \`${GHCR_IMAGE}:${SEMVER}\`
+          - \`${GHCR_IMAGE}:${MINOR}\`
+          - \`${GHCR_IMAGE}:latest\`
+          EOF
+          )
+
+          printf '%s\n\n---\n\n%s\n' "${NOTES}" "${IMAGE_NOTES}" \
+            | gh release create "${VERSION}" \
+              --verify-tag \
+              --title "${VERSION}" \
+              --notes-file -

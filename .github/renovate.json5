@@ -1,0 +1,78 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
+    'docker:enableMajor',
+    ':semanticCommits',
+    'helpers:pinGitHubActionDigests',
+  ],
+  platformAutomerge: true,
+  postUpdateOptions: ['gomodTidy'],
+  packageRules: [
+    {
+      description: 'Automerge minor/patch GitHub Actions updates',
+      matchManagers: ['github-actions'],
+      matchUpdateTypes: ['minor', 'patch', 'digest'],
+      automerge: true,
+    },
+    {
+      description: 'Automerge minor/patch Docker image updates',
+      matchDatasources: ['docker'],
+      matchUpdateTypes: ['minor', 'patch', 'digest'],
+      automerge: true,
+    },
+    {
+      description: 'Automerge minor/patch Go module updates',
+      matchManagers: ['gomod'],
+      matchUpdateTypes: ['minor', 'patch'],
+      automerge: true,
+    },
+    {
+      description: 'Automerge minor/patch CI tool updates',
+      matchPackageNames: ['rhysd/actionlint', 'markdownlint-cli2', 'golang/vuln'],
+      matchUpdateTypes: ['minor', 'patch'],
+      automerge: true,
+    },
+    {
+      description: 'Rate-limit and automerge Renovate self-updates',
+      matchPackageNames: ['renovate'],
+      matchUpdateTypes: ['minor', 'patch'],
+      schedule: ['before 2am on monday'],
+      minimumReleaseAge: '7 days',
+      automerge: true,
+    },
+  ],
+  customManagers: [
+    {
+      customType: 'regex',
+      description: ['Process go install versions in CI workflows'],
+      managerFilePatterns: ['/\\.github/workflows/.*\\.ya?ml$/'],
+      matchStrings: [
+        'go install github\\.com/(?<depName>[\\w-]+/[\\w-]+)/.+@v(?<currentValue>[\\d.]+)',
+      ],
+      datasourceTemplate: 'github-releases',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
+      description: ['Process govulncheck version in CI workflows'],
+      managerFilePatterns: ['/\\.github/workflows/.*\\.ya?ml$/'],
+      matchStrings: [
+        'go install golang\\.org/x/vuln/cmd/govulncheck@v(?<currentValue>[\\d.]+)',
+      ],
+      depNameTemplate: 'golang/vuln',
+      datasourceTemplate: 'github-releases',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
+      description: ['Process npx tool versions in CI workflows'],
+      managerFilePatterns: ['/\\.github/workflows/.*\\.ya?ml$/'],
+      matchStrings: [
+        'npx --yes (?:--package )?(?<depName>[\\w-]+)@(?<currentValue>[\\d.]+)',
+      ],
+      datasourceTemplate: 'npm',
+      versioningTemplate: 'npm',
+    },
+  ],
+}

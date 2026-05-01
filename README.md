@@ -1,11 +1,49 @@
-# Overview
+# AdGuard Exporter
 
-<p>This exporter is primarily intended to run as a sidecar container for AdGuard Home running in Kubernetes, enabling metrics visibility across multiple replica instances. It works by mounting to AdGuard's work directory and reading lines from querylog.json, as demonstrated in the deployment example below. The exporter is written in Go and uses a distroless image running as nonroot to align with container best-practices.</p>
+This exporter is primarily intended to run as a sidecar container for AdGuard
+Home in Kubernetes. It enables metrics visibility across multiple replica
+instances by mounting AdGuard Home's work directory and reading lines from
+`querylog.json`.
 
-[<img src="assets/img/agh-grafana-dash.png" width="700">](https://grafana.com/grafana/dashboards/21403)
+The exporter is written in Go and uses a distroless image running as nonroot.
 
-# Available metrics:
+[![AdGuard Home Grafana dashboard][dashboard-image]][dashboard-link]
+
+## Images And Releases
+
+Images are published to Docker Hub and GHCR:
+
+```text
+sholdee/adguardexporter
+ghcr.io/sholdee/adguard-exporter
 ```
+
+Releases are created manually from the GitHub Actions `Publish` workflow. Enter
+a SemVer version such as `2.0.3` or `v2.0.3`; the workflow validates it, runs
+tests, creates the `vX.Y.Z` git tag, publishes multi-arch images, and creates a
+GitHub Release after the image manifests verify.
+
+Each release publishes these image tags:
+
+```text
+vX.Y.Z
+X.Y.Z
+X.Y
+latest
+```
+
+The `latest` tag points to the latest release, not the latest commit on
+`master`.
+
+If a release run fails partway through, rerun the same workflow with the same
+version. The workflow can resume from a tag-only state or create a missing
+GitHub Release when the expected image tags already exist. If only some exact
+image tags exist, the workflow stops instead of overwriting SemVer tags; clean
+up the partial registry state manually before retrying.
+
+## Available Metrics
+
+```text
 agh_dns_queries_total: Total number of DNS queries
 agh_blocked_dns_queries_total: Total number of blocked DNS queries
 agh_dns_query_types_total: DNS query types and respective counts
@@ -13,14 +51,17 @@ agh_dns_query_hosts_total: Top 100 DNS query hosts
 agh_blocked_dns_query_hosts_total: Top 100 blocked DNS query hosts
 agh_safe_search_enforced_hosts_total: Safe search enforced hosts
 agh_dns_average_response_time: Average response time of all queries in ms
-agh_dns_average_upstream_response_time: Average response time of upstream servers in ms
+agh_dns_average_upstream_response_time: Average upstream response time in ms
 ```
 
-# How to use this container.
+## How To Use This Container
 
-<p>Ensure that Adguard is configured to dump query log to file at regular interval using low `size_memory` setting. This example will cause queries to be logged every 5 lines:</p>
+Configure AdGuard Home to dump query logs to disk at a regular interval by
+using a low `size_memory` setting. This example causes queries to be logged
+every five lines.
 
-### secret.yaml
+### `secret.yaml`
+
 ```yaml
 apiVersion: v1
 kind: Secret
@@ -44,9 +85,11 @@ stringData:
     # ... [remaining configuration omitted]
 ```
 
-<p>Add the sholdee/adguardexporter sidecar container to your existing Adguard deployment manifest.</p>
+Add the `sholdee/adguardexporter` sidecar container to your existing AdGuard
+deployment manifest.
 
-### deployment.yaml
+### `deployment.yaml`
+
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -92,7 +135,12 @@ spec:
           runAsGroup: 65532
           allowPrivilegeEscalation: false
         imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "cp /home/AdGuardHome.yaml /config/AdGuardHome.yaml; chmod 644 /config/AdGuardHome.yaml"]
+        command:
+          - sh
+          - -c
+          - |
+            cp /home/AdGuardHome.yaml /config/AdGuardHome.yaml
+            chmod 644 /config/AdGuardHome.yaml
         volumeMounts:
           - mountPath: /home
             name: adguard-secret
@@ -181,9 +229,10 @@ spec:
           secretName: adguard-secret
 ```
 
-<p>Add metrics port to service definition</p>
+Add the metrics port to the Service definition.
 
-### service.yaml
+### `service.yaml`
+
 ```yaml
 apiVersion: v1
 kind: Service
@@ -207,9 +256,10 @@ spec:
   type: ClusterIP
 ```
 
-<p>Create a service monitor for Prometheus to start scraping metrics.</p>
+Create a ServiceMonitor for Prometheus to start scraping metrics.
 
-### servicemonitor.yaml
+### `servicemonitor.yaml`
+
 ```yaml
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -230,3 +280,6 @@ spec:
     interval: 30s
     path: /metrics
 ```
+
+[dashboard-image]: assets/img/agh-grafana-dash.png
+[dashboard-link]: https://grafana.com/grafana/dashboards/21403
