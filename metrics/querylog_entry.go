@@ -116,6 +116,13 @@ func (r FilteringReason) IsBlocked() bool {
 
 func (r FilteringReason) IsFiltered() bool {
 	switch r {
+	case ReasonNotFilteredNotFound,
+		ReasonNotFilteredAllowList,
+		ReasonNotFilteredError,
+		ReasonRewritten,
+		ReasonRewrittenAutoHosts,
+		ReasonRewrittenRule:
+		return false
 	case ReasonFilteredBlockList,
 		ReasonFilteredSafeBrowsing,
 		ReasonFilteredParental,
