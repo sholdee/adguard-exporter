@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -79,6 +80,47 @@ func TestProcessNewLinesSkipsMalformedJSONAndStaysHealthy(t *testing.T) {
 	}
 }
 
+func TestProcessNewLinesHandlesLargeQueryLogRecords(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "querylog.json")
+	writeLogFile(t, logFilePath,
+		largeQueryLogLine("large.example", "A", strings.Repeat("a", 70*1024)),
+		queryLogLine("after-large.example", "AAAA", false, 0, 10_000_000, "1.1.1.1"),
+	)
+
+	handler := NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+
+	if !handler.IsHealthy() {
+		t.Fatal("expected large query log record to be processed without making handler unhealthy")
+	}
+	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 2 {
+		t.Fatalf("expected large and following records to update metrics, got %f", got)
+	}
+	if handler.lastPosition == 0 {
+		t.Fatal("expected handler to advance last read position after large record")
+	}
+}
+
+func TestProcessNewLinesResetsOffsetWhenLogIsTruncated(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "querylog.json")
+	writeLogFile(t, logFilePath, largeQueryLogLine("before-truncate.example", "A", strings.Repeat("a", 1024)))
+	handler := NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+
+	writeLogFile(t, logFilePath, queryLogLine("after-truncate.example", "AAAA", false, 0, 20_000_000, "1.1.1.1"))
+	handler.processNewLines()
+
+	if !handler.IsHealthy() {
+		t.Fatal("expected handler to remain healthy after processing truncated log")
+	}
+	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 2 {
+		t.Fatalf("expected truncated log to be read from beginning, got %f DNS queries", got)
+	}
+	if got := testutil.ToFloat64(metrics.QueryTypes.WithLabelValues("AAAA")); got != 1 {
+		t.Fatalf("expected query after truncation to be processed, got %f", got)
+	}
+}
+
 func TestNewLogHandlerMissingFileStartsHealthyAndAbsent(t *testing.T) {
 	resetMetricsForLogHandlerTest(t)
 	logFilePath := filepath.Join(t.TempDir(), "missing-querylog.json")
@@ -110,6 +152,15 @@ func queryLogLine(host, queryType string, blocked bool, reason int, elapsedNs in
 		upstreamField,
 		blocked,
 		reason,
+	)
+}
+
+func largeQueryLogLine(host, queryType string, answer string) string {
+	return fmt.Sprintf(
+		`{"QH":%q,"QT":%q,"Elapsed":10000000,"Upstream":"1.1.1.1","Answer":%q,"Result":{"IsFiltered":false,"Reason":0}}`,
+		host,
+		queryType,
+		answer,
 	)
 }
 

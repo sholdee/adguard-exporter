@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -115,6 +116,59 @@ func TestProcessMetricsDropsExpiredResponseTimes(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(AverageUpstreamResponseTime.WithLabelValues("1.1.1.1")); got != 30 {
 		t.Fatalf("expected upstream average response time 30ms, got %f", got)
+	}
+}
+
+func TestProcessMetricsClearsExpiredResponseTimeGauges(t *testing.T) {
+	resetMetricsForTest(t)
+	collector := NewMetricsCollector()
+	now := time.Now().Unix()
+	collector.responseTimes = []TimeValue{{Time: now - 600, Value: 100}}
+	collector.upstreamResponseTimes["1.1.1.1"] = []TimeValue{{Time: now - 600, Value: 100}}
+	AverageResponseTime.Set(42)
+	AverageUpstreamResponseTime.WithLabelValues("1.1.1.1").Set(42)
+
+	collector.ProcessMetrics()
+
+	if len(collector.responseTimes) != 0 {
+		t.Fatalf("expected expired response times to be removed, got %#v", collector.responseTimes)
+	}
+	if _, exists := collector.upstreamResponseTimes["1.1.1.1"]; exists {
+		t.Fatalf("expected expired upstream response times to be removed, got %#v", collector.upstreamResponseTimes)
+	}
+	if got := testutil.ToFloat64(AverageResponseTime); got != 0 {
+		t.Fatalf("expected expired average response time gauge to clear to 0, got %f", got)
+	}
+	if got := testutil.ToFloat64(AverageUpstreamResponseTime.WithLabelValues("1.1.1.1")); got != 0 {
+		t.Fatalf("expected expired upstream average response time gauge to clear to 0, got %f", got)
+	}
+}
+
+func TestStartProcessingClearsExpiredAveragesWithoutNewQueries(t *testing.T) {
+	resetMetricsForTest(t)
+	collector := NewMetricsCollector()
+	collector.responseTimes = []TimeValue{{Time: time.Now().Unix() - 600, Value: 100}}
+	AverageResponseTime.Set(42)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := collector.StartProcessing(ctx, time.Millisecond)
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	deadline := time.After(200 * time.Millisecond)
+	for {
+		if got := testutil.ToFloat64(AverageResponseTime); got == 0 {
+			return
+		}
+
+		select {
+		case <-deadline:
+			t.Fatalf("expected background processing to clear expired average, got %f", testutil.ToFloat64(AverageResponseTime))
+		default:
+			time.Sleep(time.Millisecond)
+		}
 	}
 }
 

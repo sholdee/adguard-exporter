@@ -32,3 +32,18 @@ func TestCustomCounterVecWithLabels(t *testing.T) {
 		t.Fatalf("expected labeled counter value 4, got %f", got)
 	}
 }
+
+func TestCustomCounterVecCreatedTimestampIsSetOnlyOnce(t *testing.T) {
+	counterVec := NewCustomCounterVec(prometheus.CounterOpts{
+		Name: "test_custom_counter_vec_created_once_total",
+		Help: "Test custom counter vec created timestamp",
+	}, []string{"label"})
+
+	counterVec.WithLabelValues("value").Inc()
+	counterVec.CreatedVec.WithLabelValues("value").Set(123)
+	counterVec.WithLabelValues("value").Inc()
+
+	if got := testutil.ToFloat64(counterVec.CreatedVec.WithLabelValues("value")); got != 123 {
+		t.Fatalf("expected created timestamp to stay at 123, got %f", got)
+	}
+}

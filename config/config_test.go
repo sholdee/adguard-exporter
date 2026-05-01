@@ -49,3 +49,21 @@ func TestLoadConfigFallsBackToDefaultPortWhenEnvPortIsInvalid(t *testing.T) {
 		t.Fatalf("expected invalid metrics port to fall back to 8000, got %d", cfg.MetricsPort)
 	}
 }
+
+func TestLoadConfigFallsBackToDefaultPortWhenEnvPortIsOutOfRange(t *testing.T) {
+	tests := []string{"0", "-1", "65536"}
+
+	for _, envPort := range tests {
+		t.Run(envPort, func(t *testing.T) {
+			t.Setenv("LOG_FILE_PATH", "")
+			t.Setenv("METRICS_PORT", envPort)
+			t.Setenv("LOG_LEVEL", "")
+
+			cfg := LoadConfig()
+
+			if cfg.MetricsPort != 8000 {
+				t.Fatalf("expected out-of-range metrics port %q to fall back to 8000, got %d", envPort, cfg.MetricsPort)
+			}
+		})
+	}
+}

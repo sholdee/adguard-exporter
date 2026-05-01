@@ -25,7 +25,11 @@ func LoadConfig() Config {
 
 	if envMetricsPort := os.Getenv("METRICS_PORT"); envMetricsPort != "" {
 		if port, err := strconv.Atoi(envMetricsPort); err == nil {
-			config.MetricsPort = port
+			if port >= 1 && port <= 65535 {
+				config.MetricsPort = port
+			} else {
+				log.Printf("Invalid METRICS_PORT value: %s. Using default: %d", envMetricsPort, config.MetricsPort)
+			}
 		} else {
 			log.Printf("Invalid METRICS_PORT value: %s. Using default: %d", envMetricsPort, config.MetricsPort)
 		}

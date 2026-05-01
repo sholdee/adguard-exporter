@@ -28,6 +28,8 @@ func main() {
 
 	// Register metrics
 	metricsCollector := metrics.NewMetricsCollector()
+	metricsCtx, stopMetrics := context.WithCancel(context.Background())
+	metricsCollector.StartProcessing(metricsCtx, 30*time.Second)
 	prometheus.MustRegister(metrics.DNSQueries.Counter, metrics.DNSQueries.Created)
 	prometheus.MustRegister(metrics.BlockedQueries.Counter, metrics.BlockedQueries.Created)
 	prometheus.MustRegister(metrics.QueryTypes.CounterVec, metrics.QueryTypes.CreatedVec)
@@ -43,8 +45,9 @@ func main() {
 	go logHandler.WatchLogFile()
 
 	// Set up HTTP server for metrics and health checks
-	http.Handle("/metrics", promhttp.Handler())
-	http.HandleFunc("/livez", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/livez", func(w http.ResponseWriter, r *http.Request) {
 		if logHandler.IsHealthy() {
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, "Alive")
@@ -53,17 +56,14 @@ func main() {
 			fmt.Fprint(w, "Unhealthy")
 		}
 	})
-	http.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "Ready")
 	})
 
 	// Start the HTTP server
 	serverAddr := fmt.Sprintf(":%d", cfg.MetricsPort)
-	server := &http.Server{
-		Addr:    serverAddr,
-		Handler: http.DefaultServeMux,
-	}
+	server := newHTTPServer(serverAddr, mux)
 
 	// Graceful shutdown
 	stop := make(chan os.Signal, 1)
@@ -78,6 +78,7 @@ func main() {
 
 	<-stop
 	log.Println("Shutting down the server...")
+	stopMetrics()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := server.Shutdown(ctx); err != nil {
 		cancel()
@@ -86,4 +87,15 @@ func main() {
 	cancel()
 
 	log.Println("Server exiting")
+}
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 }
