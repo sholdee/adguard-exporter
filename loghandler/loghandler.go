@@ -3,7 +3,9 @@ package loghandler
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -15,6 +17,11 @@ import (
 )
 
 const logFingerprintBytes = 4096
+
+type LogWatcher interface {
+	Run(context.Context)
+	Close() error
+}
 
 type LogHandler struct {
 	logFilePath      string
@@ -183,48 +190,83 @@ func (lh *LogHandler) processLine(line []byte) {
 	lh.metricsCollector.UpdateMetrics(data)
 }
 
-func (lh *LogHandler) WatchLogFile() {
-	watcher, err := fsnotify.NewWatcher()
+func (lh *LogHandler) WatchLogFile(ctx context.Context) error {
+	watcher, err := lh.NewLogWatcher()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-
-	done := make(chan bool)
-	go func() {
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				// Check if the event is for our specific file
-				if filepath.Base(event.Name) != filepath.Base(lh.logFilePath) {
-					continue // Ignore events for other files
-				}
-				if event.Op&fsnotify.Write == fsnotify.Write {
-					lh.processNewLines()
-				} else if event.Op&fsnotify.Create == fsnotify.Create {
-					log.Printf("Log file created: %s", event.Name)
-					lh.resetForCreatedFile()
-					lh.processNewLines()
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				lh.setHealth(false)
-				log.Println("error:", err)
-			}
+	defer func() {
+		if err := watcher.Close(); err != nil {
+			log.Printf("Error closing log file watcher: %v", err)
 		}
 	}()
 
-	err = watcher.Add(filepath.Dir(lh.logFilePath))
+	watcher.Run(ctx)
+	return nil
+}
+
+func (lh *LogHandler) NewLogWatcher() (LogWatcher, error) {
+	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		_ = watcher.Close()
-		log.Fatal(err)
+		lh.setHealth(false)
+		return nil, fmt.Errorf("create log file watcher: %w", err)
 	}
-	defer watcher.Close()
-	<-done
+
+	if err := watcher.Add(filepath.Dir(lh.logFilePath)); err != nil {
+		if closeErr := watcher.Close(); closeErr != nil {
+			log.Printf("Error closing log file watcher after setup failure: %v", closeErr)
+		}
+		lh.setHealth(false)
+		return nil, fmt.Errorf("watch log file directory: %w", err)
+	}
+
+	return &fsLogWatcher{handler: lh, watcher: watcher}, nil
+}
+
+type fsLogWatcher struct {
+	handler *LogHandler
+	watcher *fsnotify.Watcher
+}
+
+func (w *fsLogWatcher) Run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-w.watcher.Events:
+			if !ok {
+				return
+			}
+			w.handler.handleWatchEvent(event)
+		case err, ok := <-w.watcher.Errors:
+			if !ok {
+				return
+			}
+			w.handler.handleWatchError(err)
+		}
+	}
+}
+
+func (w *fsLogWatcher) Close() error {
+	return w.watcher.Close()
+}
+
+func (lh *LogHandler) handleWatchEvent(event fsnotify.Event) {
+	if filepath.Base(event.Name) != filepath.Base(lh.logFilePath) {
+		return
+	}
+	if event.Op&fsnotify.Write == fsnotify.Write {
+		lh.processNewLines()
+	} else if event.Op&fsnotify.Create == fsnotify.Create {
+		log.Printf("Log file created: %s", event.Name)
+		lh.resetForCreatedFile()
+		lh.processNewLines()
+	}
+}
+
+func (lh *LogHandler) handleWatchError(err error) {
+	lh.setHealth(false)
+	log.Println("error:", err)
 }
 
 func (lh *LogHandler) IsHealthy() bool {

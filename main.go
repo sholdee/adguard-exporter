@@ -42,24 +42,16 @@ func main() {
 	logHandler := loghandler.NewLogHandler(cfg.LogFilePath, metricsCollector)
 
 	// Start watching the log file
-	go logHandler.WatchLogFile()
+	watchCtx, stopWatch := context.WithCancel(context.Background())
+	watchDone, err := startLogWatcher(watchCtx, logHandler.NewLogWatcher)
+	if err != nil {
+		stopMetrics()
+		stopWatch()
+		log.Fatalf("Error watching log file: %v", err)
+	}
 
 	// Set up HTTP server for metrics and health checks
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
-	mux.HandleFunc("/livez", func(w http.ResponseWriter, r *http.Request) {
-		if logHandler.IsHealthy() {
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, "Alive")
-		} else {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprint(w, "Unhealthy")
-		}
-	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "Ready")
-	})
+	mux := newMetricsMux(logHandler, promhttp.Handler())
 
 	// Start the HTTP server
 	serverAddr := fmt.Sprintf(":%d", cfg.MetricsPort)
@@ -79,14 +71,69 @@ func main() {
 	<-stop
 	log.Println("Shutting down the server...")
 	stopMetrics()
+	stopWatch()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := server.Shutdown(ctx); err != nil {
 		cancel()
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 	cancel()
+	if !waitForLogWatcher(watchDone, 5*time.Second) {
+		log.Println("Timed out waiting for log watcher to stop")
+	}
 
 	log.Println("Server exiting")
+}
+
+func startLogWatcher(ctx context.Context, newWatcher func() (loghandler.LogWatcher, error)) (<-chan struct{}, error) {
+	watcher, err := newWatcher()
+	if err != nil {
+		return nil, err
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() {
+			if err := watcher.Close(); err != nil {
+				log.Printf("Error closing log file watcher: %v", err)
+			}
+		}()
+		watcher.Run(ctx)
+	}()
+	return done, nil
+}
+
+func waitForLogWatcher(done <-chan struct{}, timeout time.Duration) bool {
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+type logHealth interface {
+	IsHealthy() bool
+}
+
+func newMetricsMux(logHandler logHealth, metricsHandler http.Handler) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", metricsHandler)
+	mux.HandleFunc("/livez", func(w http.ResponseWriter, r *http.Request) {
+		if logHandler.IsHealthy() {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, "Alive")
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprint(w, "Unhealthy")
+		}
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "Ready")
+	})
+	return mux
 }
 
 func newHTTPServer(addr string, handler http.Handler) *http.Server {

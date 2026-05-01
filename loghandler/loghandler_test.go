@@ -1,12 +1,16 @@
 package loghandler
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/sholdee/adguard-exporter/metrics"
@@ -178,6 +182,109 @@ func TestNewLogHandlerMissingFileStartsHealthyAndAbsent(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 0 {
 		t.Fatalf("expected missing log file not to update metrics, got %f", got)
+	}
+}
+
+func TestHandleWatchEventProcessesWriteEventForLogFile(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "querylog.json")
+	writeLogFile(t, logFilePath, queryLogLine("initial.example", "A", false, 0, 10_000_000, "1.1.1.1"))
+	handler := NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+
+	appendLogLine(t, logFilePath, queryLogLine("written.example", "AAAA", false, 0, 20_000_000, "1.1.1.1"))
+	handler.handleWatchEvent(fsnotify.Event{Name: logFilePath, Op: fsnotify.Write})
+
+	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 2 {
+		t.Fatalf("expected write event to process appended log line, got %f DNS queries", got)
+	}
+	if got := testutil.ToFloat64(metrics.QueryTypes.WithLabelValues("AAAA")); got != 1 {
+		t.Fatalf("expected write event to process appended AAAA query, got %f", got)
+	}
+}
+
+func TestHandleWatchEventProcessesCreateEventForLogFile(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "querylog.json")
+	handler := NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+
+	writeLogFile(t, logFilePath, queryLogLine("created.example", "A", false, 0, 10_000_000, "1.1.1.1"))
+	handler.handleWatchEvent(fsnotify.Event{Name: logFilePath, Op: fsnotify.Create})
+
+	if !handler.fileExists {
+		t.Fatal("expected create event to mark log file as present")
+	}
+	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 1 {
+		t.Fatalf("expected create event to process new log file, got %f DNS queries", got)
+	}
+}
+
+func TestHandleWatchEventIgnoresUnrelatedFiles(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	dir := t.TempDir()
+	logFilePath := filepath.Join(dir, "querylog.json")
+	writeLogFile(t, logFilePath, queryLogLine("initial.example", "A", false, 0, 10_000_000, "1.1.1.1"))
+	handler := NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+
+	appendLogLine(t, logFilePath, queryLogLine("unread.example", "AAAA", false, 0, 20_000_000, "1.1.1.1"))
+	handler.handleWatchEvent(fsnotify.Event{Name: filepath.Join(dir, "other.json"), Op: fsnotify.Write})
+
+	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 1 {
+		t.Fatalf("expected unrelated event to leave appended log unread, got %f DNS queries", got)
+	}
+}
+
+func TestHandleWatchErrorMarksHandlerUnhealthy(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "missing-querylog.json")
+	handler := NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+
+	handler.handleWatchError(errors.New("watch failed"))
+
+	if handler.IsHealthy() {
+		t.Fatal("expected watcher error to mark handler unhealthy")
+	}
+}
+
+func TestWatchLogFileReturnsWhenContextCanceled(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "missing-querylog.json")
+	handler := NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	errc := make(chan error, 1)
+	go func() {
+		errc <- handler.WatchLogFile(ctx)
+	}()
+
+	select {
+	case err := <-errc:
+		if err != nil {
+			t.Fatalf("expected canceled watcher to return cleanly, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected canceled watcher to return")
+	}
+}
+
+func TestNewLogWatcherReturnsErrorForMissingDirectory(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "missing", "querylog.json")
+	handler := NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+
+	watcher, err := handler.NewLogWatcher()
+
+	if err == nil {
+		if closeErr := watcher.Close(); closeErr != nil {
+			t.Fatalf("close unexpected watcher: %v", closeErr)
+		}
+		t.Fatal("expected missing watch directory to return an error")
+	}
+	if watcher != nil {
+		t.Fatal("expected no watcher when setup fails")
+	}
+	if handler.IsHealthy() {
+		t.Fatal("expected watcher setup failure to mark handler unhealthy")
 	}
 }
 
