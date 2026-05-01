@@ -2,6 +2,7 @@ package loghandler
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"log"
@@ -13,10 +14,13 @@ import (
 	"github.com/sholdee/adguard-exporter/metrics"
 )
 
+const logFingerprintBytes = 4096
+
 type LogHandler struct {
 	logFilePath      string
 	metricsCollector *metrics.MetricsCollector
 	lastPosition     int64
+	lastFingerprint  []byte
 	healthStatus     bool
 	fileExists       bool
 	lock             sync.Mutex
@@ -61,9 +65,10 @@ func (lh *LogHandler) processNewLines() {
 		lh.healthStatus = false
 		return
 	}
-	if info.Size() < lh.lastPosition {
-		log.Printf("Log file was truncated; resetting read position from %d to 0", lh.lastPosition)
-		lh.lastPosition = 0
+	if err := lh.ensureReadPosition(file, info.Size()); err != nil {
+		log.Printf("Error verifying log file position: %v", err)
+		lh.healthStatus = false
+		return
 	}
 
 	_, err = file.Seek(lh.lastPosition, io.SeekStart)
@@ -74,29 +79,91 @@ func (lh *LogHandler) processNewLines() {
 	}
 
 	reader := bufio.NewReader(file)
+	position := lh.lastPosition
 	for {
+		lineStart := position
 		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
+		if err == nil {
 			lh.processLine(line)
+			position += int64(len(line))
+			continue
 		}
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			log.Printf("Error reading log file: %v", err)
-			lh.healthStatus = false
-			return
-		}
-	}
 
-	position, err := file.Seek(0, io.SeekCurrent)
-	if err != nil {
-		log.Printf("Error recording log file position: %v", err)
+		if err == io.EOF {
+			if len(line) > 0 {
+				position = lineStart
+			}
+			break
+		}
+
+		log.Printf("Error reading log file: %v", err)
 		lh.healthStatus = false
 		return
 	}
+
 	lh.lastPosition = position
+	if err := lh.refreshFingerprint(file); err != nil {
+		log.Printf("Error recording log file fingerprint: %v", err)
+		lh.healthStatus = false
+		return
+	}
 	lh.healthStatus = true
+}
+
+func (lh *LogHandler) ensureReadPosition(file *os.File, size int64) error {
+	if lh.lastPosition == 0 {
+		return nil
+	}
+	if size < lh.lastPosition {
+		log.Printf("Log file was truncated; resetting read position from %d to 0", lh.lastPosition)
+		lh.resetReadPosition()
+		return nil
+	}
+	if len(lh.lastFingerprint) == 0 {
+		return nil
+	}
+
+	fingerprint, err := readLogFingerprint(file, lh.lastPosition)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(fingerprint, lh.lastFingerprint) {
+		log.Printf("Log file changed before read position; resetting read position from %d to 0", lh.lastPosition)
+		lh.resetReadPosition()
+	}
+	return nil
+}
+
+func (lh *LogHandler) refreshFingerprint(file *os.File) error {
+	fingerprint, err := readLogFingerprint(file, lh.lastPosition)
+	if err != nil {
+		return err
+	}
+	lh.lastFingerprint = fingerprint
+	return nil
+}
+
+func (lh *LogHandler) resetReadPosition() {
+	lh.lastPosition = 0
+	lh.lastFingerprint = nil
+}
+
+func readLogFingerprint(file *os.File, position int64) ([]byte, error) {
+	if position <= 0 {
+		return nil, nil
+	}
+
+	length := int64(logFingerprintBytes)
+	if position < length {
+		length = position
+	}
+
+	fingerprint := make([]byte, length)
+	n, err := file.ReadAt(fingerprint, position-length)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	return fingerprint[:n], nil
 }
 
 func (lh *LogHandler) processLine(line []byte) {
@@ -182,6 +249,6 @@ func (lh *LogHandler) resetForCreatedFile() {
 	lh.lock.Lock()
 	defer lh.lock.Unlock()
 	lh.fileExists = true
-	lh.lastPosition = 0
+	lh.resetReadPosition()
 	lh.healthStatus = true
 }

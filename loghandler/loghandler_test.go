@@ -121,6 +121,49 @@ func TestProcessNewLinesResetsOffsetWhenLogIsTruncated(t *testing.T) {
 	}
 }
 
+func TestProcessNewLinesWaitsForPartialFinalLine(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "querylog.json")
+	partial := `{"QH":"partial.example","QT":"A","Elapsed":10000000,"Upstream":"1.1.1.1","Result":{"IsFiltered":false`
+	if err := os.WriteFile(logFilePath, []byte(partial), 0o600); err != nil {
+		t.Fatalf("write partial log file: %v", err)
+	}
+	handler := NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+
+	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 0 {
+		t.Fatalf("expected partial line not to be processed, got %f DNS queries", got)
+	}
+
+	appendLogFragment(t, logFilePath, `,"Reason":0}}`+"\n")
+	handler.processNewLines()
+
+	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 1 {
+		t.Fatalf("expected completed partial line to be processed once, got %f", got)
+	}
+	if got := testutil.ToFloat64(metrics.QueryTypes.WithLabelValues("A")); got != 1 {
+		t.Fatalf("expected completed partial A query to be processed once, got %f", got)
+	}
+}
+
+func TestProcessNewLinesResetsOffsetWhenTruncatedLogRegrowsPastOldOffset(t *testing.T) {
+	resetMetricsForLogHandlerTest(t)
+	logFilePath := filepath.Join(t.TempDir(), "querylog.json")
+	writeLogFile(t, logFilePath, largeQueryLogLine("old.example", "A", strings.Repeat("a", 128)))
+	handler := NewLogHandler(logFilePath, metrics.NewMetricsCollector())
+	oldPosition := handler.lastPosition
+
+	newLine := largeQueryLogLine("after-regrow.example", "AAAA", strings.Repeat("b", int(oldPosition)))
+	writeLogFile(t, logFilePath, newLine)
+	handler.processNewLines()
+
+	if got := testutil.ToFloat64(metrics.DNSQueries.Counter); got != 2 {
+		t.Fatalf("expected regrown truncated log to be read from beginning, got %f DNS queries", got)
+	}
+	if got := testutil.ToFloat64(metrics.QueryTypes.WithLabelValues("AAAA")); got != 1 {
+		t.Fatalf("expected query after truncate/regrow to be processed, got %f", got)
+	}
+}
+
 func TestNewLogHandlerMissingFileStartsHealthyAndAbsent(t *testing.T) {
 	resetMetricsForLogHandlerTest(t)
 	logFilePath := filepath.Join(t.TempDir(), "missing-querylog.json")
@@ -191,6 +234,20 @@ func appendLogLine(t *testing.T, path string, line string) {
 
 	if _, err := fmt.Fprintln(file, line); err != nil {
 		t.Fatalf("append log line: %v", err)
+	}
+}
+
+func appendLogFragment(t *testing.T, path string, fragment string) {
+	t.Helper()
+
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open log file for append: %v", err)
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(fragment); err != nil {
+		t.Fatalf("append log fragment: %v", err)
 	}
 }
 

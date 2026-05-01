@@ -2,6 +2,8 @@ package metrics
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -168,6 +170,33 @@ func TestStartProcessingClearsExpiredAveragesWithoutNewQueries(t *testing.T) {
 			t.Fatalf("expected background processing to clear expired average, got %f", testutil.ToFloat64(AverageResponseTime))
 		default:
 			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
+func TestProcessMetricsSerializesTopHostResetAndAdd(t *testing.T) {
+	resetMetricsForTest(t)
+	collector := NewMetricsCollector()
+	for i := range 100 {
+		host := fmt.Sprintf("host-%03d.example", i)
+		collector.topHosts.Add(host)
+	}
+
+	for range 100 {
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				collector.ProcessMetrics()
+			}()
+		}
+		wg.Wait()
+
+		for _, hostCount := range collector.topHosts.GetTop() {
+			if got := testutil.ToFloat64(TopQueryHosts.WithLabelValues(hostCount.Host)); got != float64(hostCount.Count) {
+				t.Fatalf("expected serialized top-host metric for %s to equal %d, got %f", hostCount.Host, hostCount.Count, got)
+			}
 		}
 	}
 }

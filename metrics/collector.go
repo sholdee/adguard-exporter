@@ -51,6 +51,7 @@ type MetricsCollector struct {
 	responseTimes         []TimeValue
 	upstreamResponseTimes map[string][]TimeValue
 	windowSize            int64
+	processLock           sync.Mutex
 	lock                  sync.Mutex
 }
 
@@ -125,6 +126,9 @@ func (mc *MetricsCollector) StartProcessing(ctx context.Context, interval time.D
 }
 
 func (mc *MetricsCollector) ProcessMetrics() {
+	mc.processLock.Lock()
+	defer mc.processLock.Unlock()
+
 	currentTime := time.Now().Unix()
 	cutoffTime := currentTime - mc.windowSize
 
