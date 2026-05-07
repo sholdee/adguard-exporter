@@ -87,6 +87,7 @@ go tool cover -func=coverage.txt
 go vet ./...
 go mod verify
 go mod tidy
+bash ./hack/check-go-toolchain.sh
 golangci-lint run
 actionlint -shellcheck=shellcheck
 npx --yes markdownlint-cli2@0.22.1 '**/*.md' '#node_modules'
@@ -122,6 +123,9 @@ git config core.hooksPath .githooks
   - `latest`
 - `latest` is release-owned; do not publish it from normal `master` pushes.
 - Docker builds target `linux/amd64` and `linux/arm64`.
+- The `go.mod` Go directive must match the Dockerfile `golang` builder image
+  tag. CI runs `hack/check-go-toolchain.sh` so split Docker-only Go updates do
+  not merge.
 - Docker Hub publishing expects `DOCKER_USERNAME` and `DOCKER_PASSWORD`.
 - GHCR publishing uses `GITHUB_TOKEN`.
 - The publish workflow creates the git tag before image publication, then
