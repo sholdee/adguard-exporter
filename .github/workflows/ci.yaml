@@ -92,7 +92,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Validate Renovate config
-        run: npx --yes --package renovate@43.252.1 -- renovate-config-validator --strict
+        run: npx --yes --package renovate@43.260.2 -- renovate-config-validator --strict
 
   gate:
     runs-on: ubuntu-latest
