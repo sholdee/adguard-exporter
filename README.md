@@ -1,5 +1,7 @@
 # AdGuard Exporter
 
+[![CodeFactor](https://www.codefactor.io/repository/github/sholdee/adguard-exporter/badge)](https://www.codefactor.io/repository/github/sholdee/adguard-exporter)
+
 This exporter is primarily intended to run as a sidecar container for AdGuard
 Home in Kubernetes. It enables metrics visibility across multiple replica
 instances by mounting AdGuard Home's work directory and reading lines from
