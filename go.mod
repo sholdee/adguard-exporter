@@ -1,6 +1,6 @@
 module github.com/sholdee/adguard-exporter
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
